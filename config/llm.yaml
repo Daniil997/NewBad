@@ -1,0 +1,60 @@
+# Конфигурация LLM-слоя. Значения вида ${ИМЯ:-по умолчанию} берутся из окружения.
+mode: '${LLM_MODE:-mock}'
+# Облачные вызовы разрешены только при явном ALLOW_CLOUD=true
+allow_cloud: '${ALLOW_CLOUD:-false}'
+
+providers:
+  local:
+    type: openai_compat
+    base_url: '${LOCAL_LLM_BASE_URL:-http://localhost:8080/v1}'
+    api_key: ''
+    cloud: false
+  cloud:
+    type: openai_compat
+    base_url: '${CASE_LLM_BASE_URL:-}'
+    api_key: '${CASE_LLM_API_KEY:-}'
+    cloud: true
+  mock:
+    type: mock
+    cloud: false
+
+limits:
+  daily_budget_rub: 400
+  rub_per_1k_tokens: 0.0   # заполнить по письму с ключом
+  max_retries: 2
+  timeout_s: 90
+
+# Имена моделей должны входить в список приложения 3 (app/llm/registry.py).
+# Для облачного провайдера использовать имена из письма организаторов.
+modes:
+  mock:
+    tiers:
+      light: [{provider: mock, model: mock-model}]
+      heavy: [{provider: mock, model: mock-model}]
+  local_only:
+    tiers:
+      light: [{provider: local, model: gemma-4-26b-a4b}]
+      heavy: [{provider: local, model: gemma-4-26b-a4b}]
+  local_dual:
+    tiers:
+      light: [{provider: local, model: gemma-4-26b-a4b}]
+      heavy: [{provider: local, model: qwen3.6-35b-a3b}]
+  hybrid:
+    allow_cloud: true
+    tiers:
+      light: [{provider: local, model: gemma-4-26b-a4b}]
+      heavy:
+        - {provider: cloud, model: qwen3.6-35b-a3b}
+        - {provider: local, model: gemma-4-26b-a4b}
+  cloud_only:
+    allow_cloud: true
+    tiers:
+      light: [{provider: cloud, model: gemma-4-26b-a4b}]
+      heavy: [{provider: cloud, model: qwen3.6-35b-a3b}]
+  replay:
+    cache_only: true
+    tiers:
+      light: [{provider: local, model: gemma-4-26b-a4b}]
+      heavy:
+        - {provider: cloud, model: qwen3.6-35b-a3b}
+        - {provider: local, model: gemma-4-26b-a4b}

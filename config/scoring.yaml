@@ -1,0 +1,13 @@
+# Веса формулы: score = type*сила_экспозиции + entity*совпадение + scale*материальность + bank*покрытие + fresh*свежесть - dup*дубликат
+weights:
+  type: 0.35
+  entity: 0.25
+  scale: 0.15
+  bank: 0.15
+  fresh: 0.10
+  dup: 0.50
+thresholds:
+  show: 0.30
+  top_n: 6
+freshness:
+  half_life_days: 14

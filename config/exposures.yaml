@@ -1,0 +1,50 @@
+# Правила экспозиций профиля. Флаг считается включённым при значении 1, true, Y или да
+# (формат в датасете уточнить на этапе 1).
+exposures:
+  rate_borrower:
+    when: {any_flag: [CL_PRODUCT_LOA_MARK, CL_PRODUCT_LEA_MARK]}
+    strength: 0.9
+    assumptions:
+      - 'Тип процентной ставки по кредитам неизвестен: не утверждаем, что она плавающая.'
+  rate_saver:
+    when: {any_flag: [CL_PRODUCT_DEP_MARK]}
+    strength: 0.8
+    assumptions:
+      - 'Срок и ставка депозита неизвестны.'
+  liquidity_factoring:
+    when: {any_flag: [FACTORING_MARK]}
+    strength: 0.5
+    assumptions: []
+  fx_exposure:
+    when: {any_flag: [FTS_FLAG]}
+    strength: 0.8
+    assumptions:
+      - 'Доля валютной выручки неизвестна, если её не указал клиент.'
+  country_exposure:
+    when: {feature_present: [FTS_COUNTRY_NAME]}
+    strength: 0.7
+    assumptions: []
+  commodity_energy:
+    when: {derived_theme: [energy]}
+    strength: 0.7
+    assumptions: []
+  commodity_metals:
+    when: {derived_theme: [metals]}
+    strength: 0.7
+    assumptions: []
+  commodity_precious:
+    when: {derived_theme: [precious_metals]}
+    strength: 0.7
+    assumptions: []
+  consumption:
+    when: {derived_theme: [trade, food]}
+    strength: 0.5
+    assumptions: []
+  sector_regulation:
+    when: {feature_present: [MAINOKVED_CODE]}
+    strength: 0.4
+    assumptions: []
+  counterparty:
+    when: {derived: counterparty_match}
+    strength: 0.9
+    assumptions: []

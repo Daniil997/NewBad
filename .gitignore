@@ -11,3 +11,24 @@ Thumbs.db
 
 # Local helper: commit/push to develop (not shared)
 git-develop.ps1
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Weights, raw data, caches and local journal
+models/*
+!models/README.md
+data/raw/*
+!data/raw/.gitkeep
+data/cache/*
+!data/cache/.gitkeep
+data/*.sqlite3
+
+# Frontend
+node_modules/
+ui/dist/

@@ -1,0 +1,30 @@
+# Запуск: docker compose up --build
+# Локальная модель на CPU: docker compose --profile llm-cpu up --build
+services:
+  app:
+    build: .
+    ports:
+      - '8000:8000'
+    environment:
+      LLM_MODE: ${LLM_MODE:-mock}
+      ALLOW_CLOUD: ${ALLOW_CLOUD:-false}
+      LOCAL_LLM_BASE_URL: ${LOCAL_LLM_BASE_URL:-http://host.docker.internal:8080/v1}
+      CASE_LLM_BASE_URL: ${CASE_LLM_BASE_URL:-}
+      CASE_LLM_API_KEY: ${CASE_LLM_API_KEY:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      DEMO_MODE: ${DEMO_MODE:-true}
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    volumes:
+      - ./data:/srv/data
+      - ./config:/srv/config
+
+  llm-cpu:
+    profiles: ['llm-cpu']
+    # Проверить актуальный тег образа llama.cpp перед использованием
+    image: ghcr.io/ggml-org/llama.cpp:server
+    command: ['-m', '/models/${LLM_GGUF_FILE:-model.gguf}', '--host', '0.0.0.0', '--port', '8080', '-c', '4096']
+    volumes:
+      - ./models:/models:ro
+    ports:
+      - '8080:8080'

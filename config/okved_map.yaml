@@ -1,0 +1,35 @@
+# Префиксы ОКВЭД-2 в тему. Применяется самый длинный подходящий префикс. Дополнять по датасету.
+prefixes:
+  '01': agro
+  '05': energy
+  '06': energy
+  '07': metals
+  '07.29': precious_metals
+  '10': food
+  '19': energy
+  '24': metals
+  '24.41': precious_metals
+  '35': utilities
+  '41': construction
+  '42': construction
+  '43': construction
+  '46': trade
+  '47': trade
+  '49': transport
+  '50': transport
+  '51': transport
+  '52': transport
+  '64': finance
+  '68': real_estate
+themes:
+  energy: [commodities_energy]
+  metals: [commodities_energy]
+  precious_metals: [precious_metals]
+  agro: [commodities_energy, sanctions_trade]
+  food: [consumption_labor]
+  trade: [consumption_labor]
+  construction: [monetary_policy]
+  transport: [commodities_energy]
+  finance: [monetary_policy]
+  real_estate: [monetary_policy]
+  utilities: [regulation_tax]
