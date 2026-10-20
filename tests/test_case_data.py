@@ -1,10 +1,14 @@
 import os
 
 import pytest
+import yaml
 
+from app.db import ROOT
 from app.profile.build import load_profiles
 from app.profile.case_data import appendix_paths, case_profile, clear_case_cache
 from app.profile.sources import COMPANY_COLUMNS, using_case_extract
+
+SEGMENT_RUB = 15_000_000_000
 
 
 @pytest.fixture
@@ -15,18 +19,26 @@ def case_extract(monkeypatch):
 
 
 def test_case_extract_has_borrower_and_saver(case_extract):
-    borrower = case_profile("U_23929")
-    saver = case_profile("U_12470")
-    assert borrower is not None and saver is not None
+    payload = yaml.safe_load((ROOT / "config" / "case_clients.yaml").read_text(encoding="utf-8"))
+    assert set(payload) == {"clients"}
+    ids = [str(item) for item in payload["clients"]]
+    borrower, saver, peer = (case_profile(item) for item in ids)
+    assert borrower is not None and saver is not None and peer is not None
     assert borrower.money_role == "borrower"
     assert saver.money_role == "saver"
+    assert peer.money_role == "neither"
     assert "rate_borrower" in {item.id for item in borrower.exposures}
     assert "rate_saver" in {item.id for item in saver.exposures}
     assert "rate_borrower" not in {item.id for item in saver.exposures}
+    assert "rate_borrower" not in {item.id for item in peer.exposures}
+    assert "rate_saver" not in {item.id for item in peer.exposures}
+    assert borrower.cohort_key == peer.cohort_key
     assert borrower.cohort_share is not None and borrower.cohort_share < 1
     assert borrower.counterparties
-    ids = [item.client_id for item in load_profiles()]
-    assert ids == ["U_23929", "U_12470", "U_416505"]
+    for profile in (borrower, saver, peer):
+        revenue = next(item.value for item in profile.features if item.id == "REVENUE_COMPANY")
+        assert float(revenue) >= SEGMENT_RUB
+    assert [item.client_id for item in load_profiles()] == ids
     files = appendix_paths()
     assert len(files) == 9
     assert all(path.is_file() for path in files)
