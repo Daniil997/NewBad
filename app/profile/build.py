@@ -55,8 +55,8 @@ class Exposure(BaseModel):
 class Counterparty(BaseModel):
     client_id: str
     direction: str
-    pay_amt: float
-    pay_cnt: int
+    pay_amt: float | None
+    pay_cnt: int | None
     same_group: bool
 
 
@@ -315,15 +315,18 @@ def _exposures(row: dict[str, str], rules: dict, theme: str | None, counterparti
 
 
 def _links(payments: list[dict[str, str]], companies: dict[str, dict[str, str]]) -> dict[str, list[Counterparty]]:
-    grouped: dict[tuple[str, str, str], list[tuple[float, int]]] = {}
+    """Одна пара плательщик–получатель — одна связь. Совпадающие строки не суммируются."""
+    grouped: dict[tuple[str, str, str], list[tuple[float | None, int | None]]] = {}
     for row in payments:
         payer = _text(row.get("PAYER"))
         beneficiary = _text(row.get("BENEFICIARY"))
-        amount = _money(row.get("PAY_AMT")) or 0
-        count = int(_money(row.get("PAY_CNT")) or 0)
-        if payer and beneficiary:
-            grouped.setdefault((payer, beneficiary, "out"), []).append((amount, count))
-            grouped.setdefault((beneficiary, payer, "in"), []).append((amount, count))
+        if not payer or not beneficiary or payer == beneficiary:
+            continue
+        amount = _money(row.get("PAY_AMT"))
+        count_value = _money(row.get("PAY_CNT"))
+        count = int(count_value) if count_value is not None else None
+        grouped.setdefault((payer, beneficiary, "out"), []).append((amount, count))
+        grouped.setdefault((beneficiary, payer, "in"), []).append((amount, count))
 
     result: dict[str, list[Counterparty]] = {}
     for (owner, other, direction), parts in grouped.items():
@@ -335,14 +338,22 @@ def _links(payments: list[dict[str, str]], companies: dict[str, dict[str, str]])
             Counterparty(
                 client_id=other,
                 direction=direction,
-                pay_amt=sum(amount for amount, _count in parts),
-                pay_cnt=sum(count for _amount, count in parts),
+                pay_amt=_agreed_number(amount for amount, _count in parts),
+                pay_cnt=_agreed_number(count for _amount, count in parts),
                 same_group=bool(owner_group and owner_group == other_group),
             )
         )
     for items in result.values():
-        items.sort(key=lambda item: (-item.pay_amt, item.client_id))
+        items.sort(key=lambda item: (item.pay_amt is None, -(item.pay_amt or 0), item.client_id))
     return result
+
+
+def _agreed_number(values) -> float | int | None:
+    found = [value for value in values if value is not None]
+    unique = set(found)
+    if len(unique) == 1:
+        return unique.pop()
+    return None
 
 
 def _counts_as_missing(field: str, row: dict[str, str]) -> bool:
