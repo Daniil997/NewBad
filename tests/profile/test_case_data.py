@@ -6,7 +6,7 @@ import yaml
 from app.db import ROOT
 from app.profile.build import load_profiles
 from app.profile.case_data import appendix_paths, case_profile, clear_case_cache
-from app.profile.sources import COMPANY_COLUMNS, using_case_extract
+from app.profile.sources import COMPANY_COLUMNS, SourceError, using_case_extract
 
 SEGMENT_RUB = 15_000_000_000
 
@@ -64,7 +64,7 @@ def _company(client_id: str, **extra: str) -> dict[str, str]:
     return row
 
 
-def _prepare(tmp_path, monkeypatch, companies, payments, persons) -> object:
+def _prepare(tmp_path, monkeypatch, companies, payments, persons):
     folder = tmp_path / "DATA"
     folder.mkdir()
     _write_companies(folder / "df_Uid_data_hack.csv", companies)
@@ -83,7 +83,50 @@ def _value(profile, feature_id: str) -> str | None:
     return found[0] if found else None
 
 
-def test_payments_keep_direction_without_double_count(tmp_path, monkeypatch):
+def test_correct_csv_loads_profile(tmp_path, monkeypatch):
+    _prepare(
+        tmp_path,
+        monkeypatch,
+        [_company("U_A", REVENUE_COMPANY="100", MAINOKVED_NAME="Металлы")],
+        ["U_A;U_B;10;1"],
+        ["F1;U_A"],
+    )
+    profile = case_profile("U_A")
+    assert profile is not None
+    assert profile.client_id == "U_A"
+    assert _value(profile, "MAINOKVED_NAME") == "Металлы"
+    assert _value(profile, "REVENUE_COMPANY") == "100"
+    assert len(profile.counterparties) == 1
+    assert profile.counterparties[0].client_id == "U_B"
+    assert profile.counterparties[0].direction == "out"
+    assert _value(profile, "related_persons") == "1"
+
+
+def test_missing_file_and_wrong_schema(tmp_path, monkeypatch):
+    folder = tmp_path / "DATA"
+    folder.mkdir()
+    monkeypatch.setenv("PROFILE_SOURCE", "case")
+    monkeypatch.setenv("CASE_DATA_DIR", str(folder))
+    clear_case_cache()
+    with pytest.raises(SourceError) as raised:
+        case_profile("U_A")
+    assert raised.value.kind == "missing"
+
+    (folder / "df_Uid_data_hack.csv").write_text("A;B\n1;2\n", encoding="utf-8")
+    clear_case_cache()
+    with pytest.raises(SourceError) as raised:
+        case_profile("U_A")
+    assert raised.value.kind == "schema"
+
+
+def test_unknown_company_id(tmp_path, monkeypatch):
+    _prepare(tmp_path, monkeypatch, [_company("U_A")], ["U_A;U_B;1;1"], ["F1;U_A"])
+    assert case_profile("NOBODY") is None
+    assert case_profile("  ") is None
+    assert case_profile("U_A") is not None
+
+
+def test_payments_both_directions_and_link_count(tmp_path, monkeypatch):
     _prepare(
         tmp_path,
         monkeypatch,
@@ -106,6 +149,7 @@ def test_payments_keep_direction_without_double_count(tmp_path, monkeypatch):
     profile = case_profile("U_A")
     assert profile is not None
     links = {(item.client_id, item.direction): item for item in profile.counterparties}
+    assert len(profile.counterparties) == 3
     assert links[("U_B", "out")].pay_amt == 10
     assert links[("U_B", "out")].pay_cnt == 1
     assert links[("U_B", "out")].same_group is True
@@ -117,7 +161,29 @@ def test_payments_keep_direction_without_double_count(tmp_path, monkeypatch):
     assert _value(profile, "related_persons") == "2"
 
 
-def test_company_revenue_is_not_summed_with_group_or_duplicates(tmp_path, monkeypatch):
+def test_missing_and_invalid_revenue(tmp_path, monkeypatch):
+    _prepare(
+        tmp_path,
+        monkeypatch,
+        [
+            _company("U_OK", REVENUE_COMPANY="100"),
+            _company("U_EMPTY", REVENUE_COMPANY="", GROUP_ID=""),
+            _company("U_BAD", REVENUE_COMPANY="не число", GROUP_ID=""),
+        ],
+        ["U_OK;U_EMPTY;1;1"],
+        ["F1;U_OK"],
+    )
+    empty = case_profile("U_EMPTY")
+    invalid = case_profile("U_BAD")
+    assert empty is not None and invalid is not None
+    assert _value(empty, "REVENUE_COMPANY") is None
+    assert empty.cohort_share is None
+    assert "REVENUE_COMPANY" in empty.missing_data
+    assert _value(invalid, "REVENUE_COMPANY") == "не число"
+    assert invalid.cohort_share is None
+
+
+def test_revenue_and_payments_are_not_double_counted(tmp_path, monkeypatch):
     _prepare(
         tmp_path,
         monkeypatch,
@@ -127,43 +193,28 @@ def test_company_revenue_is_not_summed_with_group_or_duplicates(tmp_path, monkey
             _company("U_B", REVENUE_COMPANY="300"),
             _company("U_C", REVENUE_COMPANY="1", GROUP_ID="G"),
             _company("U_C", REVENUE_COMPANY="9", GROUP_ID="H"),
-            _company("U_E", REVENUE_COMPANY="", GROUP_ID=""),
         ],
-        ["U_A;U_B;1;1"],
+        ["U_A;U_B;10;1", "U_A;U_B;10;1"],
         ["F1;U_A"],
     )
     first = case_profile("U_A")
     second = case_profile("U_B")
     conflict = case_profile("U_C")
-    empty = case_profile("U_E")
-    assert first is not None and second is not None and conflict is not None and empty is not None
+    assert first is not None and second is not None and conflict is not None
     assert _value(first, "REVENUE_COMPANY") == "100"
     assert first.cohort_share == 0.25
+    assert len(first.counterparties) == 1
+    assert first.counterparties[0].pay_amt == 10
     assert _value(first, "group_rank") == "2"
     assert _value(first, "group_size") == "2"
     assert _value(second, "group_rank") == "1"
     assert _value(conflict, "REVENUE_COMPANY") is None
     assert conflict.cohort_share is None
-    assert "REVENUE_COMPANY" in conflict.missing_data
-    assert _value(empty, "REVENUE_COMPANY") is None
-    assert empty.cohort_share is None
-    assert "REVENUE_COMPANY" in empty.missing_data
 
 
-def test_unknown_id_and_cache_follows_file(tmp_path, monkeypatch):
-    folder = _prepare(
-        tmp_path,
-        monkeypatch,
-        [_company("U_A", REVENUE_COMPANY="100")],
-        ["U_A;U_B;1;1"],
-        ["F1;U_A"],
-    )
-    assert case_profile("NOBODY") is None
-    assert case_profile("  ") is None
-    profile = case_profile("U_A")
-    assert profile is not None
-    assert _value(profile, "REVENUE_COMPANY") == "100"
-
+def test_cache_follows_company_file(tmp_path, monkeypatch):
+    folder = _prepare(tmp_path, monkeypatch, [_company("U_A", REVENUE_COMPANY="100")], ["U_A;U_B;1;1"], ["F1;U_A"])
+    assert _value(case_profile("U_A"), "REVENUE_COMPANY") == "100"
     path = folder / "df_Uid_data_hack.csv"
     stamp = path.stat().st_mtime_ns
     _write_companies(path, [_company("U_A", REVENUE_COMPANY="400")])
