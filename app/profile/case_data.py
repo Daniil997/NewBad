@@ -42,9 +42,9 @@ def case_profile(client_id: str) -> ClientProfile | None:
 
 
 def appendix_paths() -> list[Path]:
-    from app.profile.sources import case_dir
+    from app.profile.sources import bank_pdf_dir
 
-    folder = case_dir()
+    folder = bank_pdf_dir()
     if folder is None:
         return []
     payload = yaml.safe_load((ROOT / "config" / "bank_appendix.yaml").read_text(encoding="utf-8"))

@@ -2,7 +2,7 @@
 
 Прототип сервиса новостной аналитики для руководителей крупного бизнеса (Альфа-Хак 2026, кейс Changellenge × Альфа-Банк). Сервис выбирает внешние события под конкретную компанию и показывает три отдельных слоя: факт из новости, позицию аналитиков банка и вывод модели.
 
-**Статус:** этап 5 готов, этап 6 ждёт файл Gemma. Пока ответы собирает заглушка. Дальше — скачать веса и запустить `scripts/llama-server.ps1`, см. [docs/ROADMAP.md](docs/ROADMAP.md).
+**Статус:** этап 5 готов, этап 6 ждёт файл Gemma. Пока ответы собирает заглушка. Дальше — скачать веса и запустить `scripts/llama-server.ps1`, см. [план работ](../Doc/NewBad/ROADMAP.md).
 
 ## Быстрый старт
 
@@ -41,13 +41,14 @@ pytest
 app/        api, agent, llm, scoring, profile, ingest, retrieval, tracing, schemas
 config/     llm, taxonomy, exposures, scoring, okved_map, prompt_fields
 data/       raw (не в git), demo, news, bank, cache
-docs/       архитектура, схема карточки, план работ
 eval/       набор оценки и метрики
 scripts/    служебные скрипты
 ui/         интерфейс: TypeScript, React, Vite (этап 5)
 models/     веса GGUF (не в git)
 tests/
 ```
+
+Архитектура, схема карточки, план работ и журнал лежат рядом с репозиторием, в `../Doc/NewBad`.
 
 ## Ветки и версии
 
