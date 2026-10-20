@@ -12,18 +12,18 @@
 - [x] `scripts/dev.ps1`
 
 ## Этап 1. Профиль компании
-- [ ] Синтетический CSV: заёмщик и вкладчик
-- [ ] Загрузка DuckDB, признаки, `missing_data`
-- [ ] Экспозиции из `config/exposures.yaml`
-- [ ] `GET /api/clients` и `GET /api/clients/{id}`
-- [ ] Тест: у клиентов разные экспозиции
+- [x] Синтетический CSV: заёмщик и вкладчик
+- [x] Загрузка DuckDB, признаки, `missing_data`
+- [x] Экспозиции из `config/exposures.yaml`
+- [x] `GET /api/clients` и `GET /api/clients/{id}`
+- [x] Тест: у клиентов разные экспозиции
 
 ## Этап 2. Корпус и поиск
-- [ ] 8–12 новостей в `data/news`
-- [ ] Паспорт материала банка по ставке, цитата — подстрока
-- [ ] Классификация по `config/taxonomy.yaml`
-- [ ] BM25, `search_news`, `search_bank_analytics`
-- [ ] Тест: новость про 14% имеет тип `monetary_policy`
+- [x] 8–12 новостей в `data/news`
+- [x] Паспорт материала банка по ставке, цитата — подстрока
+- [x] Классификация по `config/taxonomy.yaml`
+- [x] BM25, `search_news`, `search_bank_analytics`
+- [x] Тест: новость про 14% имеет тип `monetary_policy`
 
 ## Этап 3. Лента
 - [ ] Скоринг по `config/scoring.yaml` без модели

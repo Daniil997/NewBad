@@ -1,0 +1,364 @@
+from pathlib import Path
+
+import yaml
+from pydantic import BaseModel
+
+from app.db import ROOT
+from app.profile.sources import companies_csv, payments_csv, read_csv
+
+FLAG_ON = {"1", "true", "y", "yes", "да"}
+
+FIELD_LABELS = {
+    "ORG_TYPE": "Тип организации",
+    "OKFS_NAME": "Форма собственности",
+    "COMPANY_AGE_YEARS_GRADATION": "Возраст компании",
+    "ECO_MARK_LABEL": "Стадия развития",
+    "MAINOKVED_CODE": "ОКВЭД",
+    "MAINOKVED_NAME": "Вид деятельности",
+    "NEGATIVEMARK": "Признак ключевого собственника",
+    "REVENUE_COMPANY": "Годовая выручка",
+    "GROUP_ID": "Группа компаний",
+    "AMOUNT_WORKERS_FNS_GRADATION": "Численность по ФНС",
+    "AMOUNT_WORKERS_SPARK_GRADATION": "Численность по СПАРК",
+    "CL_TYPE": "Тип клиента",
+    "CITY": "Город",
+    "REGION": "Регион",
+    "CL_PRODUCT_RKO_MARK": "Расчётно-кассовое обслуживание",
+    "CL_PRODUCT_GAR_MARK": "Банковские гарантии",
+    "CL_PRODUCT_LOA_MARK": "Кредитные продукты",
+    "CL_PRODUCT_LEA_MARK": "Лизинг",
+    "CL_PRODUCT_DEP_MARK": "Депозиты",
+    "CL_PRODUCT_ZPP_MARK": "Зарплатный проект",
+    "FTS_FLAG": "Есть данные ФТС",
+    "FTS_COUNTRY_NAME": "Страна в данных ФТС",
+    "FACTORING_MARK": "Факторинг",
+}
+
+WATCHED_FIELDS = list(FIELD_LABELS)
+
+
+class Feature(BaseModel):
+    id: str
+    label: str
+    value: str
+    origin: str
+    source_fields: list[str]
+
+
+class Exposure(BaseModel):
+    id: str
+    strength: float
+    feature_refs: list[str]
+    assumptions: list[str]
+
+
+class Counterparty(BaseModel):
+    client_id: str
+    direction: str
+    pay_amt: float
+    pay_cnt: int
+    same_group: bool
+
+
+class ClientProfile(BaseModel):
+    client_id: str
+    title: str
+    money_role: str
+    cohort_key: str | None
+    cohort_share: float | None
+    features: list[Feature]
+    missing_data: list[str]
+    exposures: list[Exposure]
+    counterparties: list[Counterparty]
+
+
+class ClientSummary(BaseModel):
+    client_id: str
+    title: str
+    money_role: str
+    exposure_ids: list[str]
+
+
+def load_profiles() -> list[ClientProfile]:
+    company_path = companies_csv()
+    if not company_path.is_file():
+        raise FileNotFoundError(f"Нет файла компаний: {company_path}")
+    companies = read_csv(company_path)
+    payments = read_csv(payments_csv()) if payments_csv() else []
+    rules = _load_yaml(ROOT / "config" / "exposures.yaml")["exposures"]
+    themes = _load_yaml(ROOT / "config" / "okved_map.yaml")["prefixes"]
+    return _build_profiles(companies, payments, rules, themes)
+
+
+def get_profile(client_id: str) -> ClientProfile | None:
+    for profile in load_profiles():
+        if profile.client_id == client_id:
+            return profile
+    return None
+
+
+def _build_profiles(
+    companies: list[dict[str, str]],
+    payments: list[dict[str, str]],
+    rules: dict,
+    prefixes: dict[str, str],
+) -> list[ClientProfile]:
+    by_id = {_text(row.get("SYNTHETIC_U")): row for row in companies if _text(row.get("SYNTHETIC_U"))}
+    cohort_revenue = _sum_by(
+        by_id.values(),
+        lambda row: _cohort_key(row),
+        lambda row: _money(row.get("REVENUE_COMPANY")),
+    )
+    group_revenue = _sum_by(
+        by_id.values(),
+        lambda row: _text(row.get("GROUP_ID")),
+        lambda row: _money(row.get("REVENUE_COMPANY")),
+    )
+    group_size: dict[str, int] = {}
+    for row in by_id.values():
+        group = _text(row.get("GROUP_ID"))
+        if group:
+            group_size[group] = group_size.get(group, 0) + 1
+    links = _links(payments, by_id)
+
+    profiles: list[ClientProfile] = []
+    for client_id, row in by_id.items():
+        features: list[Feature] = []
+        missing: list[str] = []
+        for field in WATCHED_FIELDS:
+            raw = row.get(field)
+            if _blank(raw):
+                if _counts_as_missing(field, row):
+                    missing.append(field)
+                continue
+            features.append(
+                Feature(
+                    id=field,
+                    label=FIELD_LABELS[field],
+                    value=_text(raw),
+                    origin="bank_data",
+                    source_fields=[field],
+                )
+            )
+
+        revenue = _money(row.get("REVENUE_COMPANY"))
+        cohort = _cohort_key(row)
+        share = None
+        if revenue is not None and cohort and cohort_revenue.get(cohort):
+            share = round(revenue / cohort_revenue[cohort], 4)
+            features.append(
+                Feature(
+                    id="cohort_share",
+                    label="Доля выручки в когорте ОКВЭД среди клиентов банка",
+                    value=str(share),
+                    origin="derived",
+                    source_fields=["REVENUE_COMPANY", "MAINOKVED_CODE"],
+                )
+            )
+
+        group = _text(row.get("GROUP_ID"))
+        if group and revenue is not None and group_revenue.get(group):
+            rank = _group_rank(client_id, group, by_id)
+            features.append(
+                Feature(
+                    id="group_rank",
+                    label="Место в группе по выручке",
+                    value=str(rank),
+                    origin="derived",
+                    source_fields=["GROUP_ID", "REVENUE_COMPANY"],
+                )
+            )
+            features.append(
+                Feature(
+                    id="group_size",
+                    label="Компаний в группе",
+                    value=str(group_size.get(group, 1)),
+                    origin="derived",
+                    source_fields=["GROUP_ID"],
+                )
+            )
+
+        theme = _theme(_text(row.get("MAINOKVED_CODE")), prefixes)
+        if theme:
+            features.append(
+                Feature(
+                    id="okved_theme",
+                    label="Товарная тема по ОКВЭД",
+                    value=theme,
+                    origin="derived",
+                    source_fields=["MAINOKVED_CODE"],
+                )
+            )
+
+        role = _money_role(row)
+        features.append(
+            Feature(
+                id="money_role",
+                label="Роль по стоимости денег",
+                value=role,
+                origin="derived",
+                source_fields=["CL_PRODUCT_LOA_MARK", "CL_PRODUCT_LEA_MARK", "CL_PRODUCT_DEP_MARK"],
+            )
+        )
+
+        counterparties = links.get(client_id, [])
+        exposures = _exposures(row, rules, theme, counterparties)
+        title = _text(row.get("MAINOKVED_NAME")) or client_id
+        profiles.append(
+            ClientProfile(
+                client_id=client_id,
+                title=title,
+                money_role=role,
+                cohort_key=cohort,
+                cohort_share=share,
+                features=features,
+                missing_data=missing,
+                exposures=exposures,
+                counterparties=counterparties,
+            )
+        )
+    return sorted(profiles, key=lambda item: item.client_id)
+
+
+def _exposures(row: dict[str, str], rules: dict, theme: str | None, counterparties: list[Counterparty]) -> list[Exposure]:
+    found: list[Exposure] = []
+    for exposure_id, rule in rules.items():
+        when = rule.get("when") or {}
+        refs: list[str] = []
+        if "any_flag" in when and any(_flag(row.get(field)) for field in when["any_flag"]):
+            refs.extend(field for field in when["any_flag"] if _flag(row.get(field)))
+        elif "feature_present" in when and any(not _blank(row.get(field)) for field in when["feature_present"]):
+            refs.extend(field for field in when["feature_present"] if not _blank(row.get(field)))
+        elif "derived_theme" in when and theme in when["derived_theme"]:
+            refs.append("okved_theme")
+        elif when.get("derived") == "counterparty_match" and counterparties:
+            refs.append("counterparties")
+        else:
+            continue
+        found.append(
+            Exposure(
+                id=exposure_id,
+                strength=float(rule.get("strength", 0)),
+                feature_refs=refs,
+                assumptions=list(rule.get("assumptions") or []),
+            )
+        )
+    return found
+
+
+def _links(payments: list[dict[str, str]], companies: dict[str, dict[str, str]]) -> dict[str, list[Counterparty]]:
+    grouped: dict[tuple[str, str, str], list[tuple[float, int]]] = {}
+    for row in payments:
+        payer = _text(row.get("PAYER"))
+        beneficiary = _text(row.get("BENEFICIARY"))
+        amount = _money(row.get("PAY_AMT")) or 0
+        count = int(_money(row.get("PAY_CNT")) or 0)
+        if payer and beneficiary:
+            grouped.setdefault((payer, beneficiary, "out"), []).append((amount, count))
+            grouped.setdefault((beneficiary, payer, "in"), []).append((amount, count))
+
+    result: dict[str, list[Counterparty]] = {}
+    for (owner, other, direction), parts in grouped.items():
+        if owner not in companies:
+            continue
+        owner_group = _text(companies[owner].get("GROUP_ID"))
+        other_group = _text(companies.get(other, {}).get("GROUP_ID"))
+        result.setdefault(owner, []).append(
+            Counterparty(
+                client_id=other,
+                direction=direction,
+                pay_amt=sum(amount for amount, _count in parts),
+                pay_cnt=sum(count for _amount, count in parts),
+                same_group=bool(owner_group and owner_group == other_group),
+            )
+        )
+    for items in result.values():
+        items.sort(key=lambda item: (-item.pay_amt, item.client_id))
+    return result
+
+
+def _counts_as_missing(field: str, row: dict[str, str]) -> bool:
+    if field == "FTS_COUNTRY_NAME" and not _flag(row.get("FTS_FLAG")):
+        return False
+    return True
+
+
+def _money_role(row: dict[str, str]) -> str:
+    borrower = _flag(row.get("CL_PRODUCT_LOA_MARK")) or _flag(row.get("CL_PRODUCT_LEA_MARK"))
+    saver = _flag(row.get("CL_PRODUCT_DEP_MARK"))
+    if borrower and saver:
+        return "both"
+    if borrower:
+        return "borrower"
+    if saver:
+        return "saver"
+    return "neither"
+
+
+def _cohort_key(row: dict[str, str]) -> str | None:
+    code = _text(row.get("MAINOKVED_CODE"))
+    if not code:
+        return None
+    return code.split(".", 1)[0]
+
+
+def _theme(code: str, prefixes: dict[str, str]) -> str | None:
+    best: str | None = None
+    best_length = -1
+    for prefix, theme in prefixes.items():
+        if code.startswith(str(prefix)) and len(str(prefix)) > best_length:
+            best = str(theme)
+            best_length = len(str(prefix))
+    return best
+
+
+def _group_rank(client_id: str, group: str, companies: dict[str, dict[str, str]]) -> int:
+    members = [
+        (cid, _money(row.get("REVENUE_COMPANY")) or -1)
+        for cid, row in companies.items()
+        if _text(row.get("GROUP_ID")) == group
+    ]
+    members.sort(key=lambda item: item[1], reverse=True)
+    for index, (cid, _revenue) in enumerate(members, start=1):
+        if cid == client_id:
+            return index
+    return len(members)
+
+
+def _sum_by(rows, key_of, value_of) -> dict[str, float]:
+    totals: dict[str, float] = {}
+    for row in rows:
+        key = key_of(row)
+        value = value_of(row)
+        if not key or value is None:
+            continue
+        totals[key] = totals.get(key, 0.0) + value
+    return totals
+
+
+def _load_yaml(path: Path) -> dict:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def _flag(value: str | None) -> bool:
+    return _text(value).lower() in FLAG_ON
+
+
+def _blank(value: str | None) -> bool:
+    return _text(value) == ""
+
+
+def _text(value: str | None) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _money(value: str | None) -> float | None:
+    text = _text(value).replace(" ", "").replace(",", ".")
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None

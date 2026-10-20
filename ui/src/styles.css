@@ -10,7 +10,7 @@ body {
 }
 
 .page {
-  max-width: 40rem;
+  max-width: 46rem;
   margin: 0 auto;
   padding: 4rem 1.5rem;
 }
@@ -71,4 +71,90 @@ dt {
 
 dd {
   margin: 0;
+}
+
+.clients {
+  margin-top: 1rem;
+}
+
+.switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.switcher button {
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 12px;
+  padding: 0.55rem 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.switcher button span {
+  display: block;
+  color: #777;
+  font-size: 0.8rem;
+}
+
+.switcher button.active {
+  border-color: #ef3124;
+  box-shadow: inset 0 0 0 1px #ef3124;
+}
+
+.profile .title {
+  margin: 0 0 0.6rem;
+  font-weight: 650;
+}
+
+.error {
+  color: #b42318;
+}
+
+.search {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.8rem;
+}
+
+.search input {
+  flex: 1;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+}
+
+.search button,
+.hits span {
+  border: 0;
+  background: #ef3124;
+  color: #fff;
+  border-radius: 10px;
+  padding: 0.45rem 0.7rem;
+}
+
+.hits {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+
+.hits li {
+  padding: 0.45rem 0;
+  border-top: 1px solid #eee;
+}
+
+.hits span {
+  display: inline-block;
+  margin-left: 0.5rem;
+  background: #f4f1ea;
+  color: #333;
+  font-size: 0.75rem;
+}
+
+.hits p {
+  margin: 0.25rem 0 0;
+  color: #444;
 }
