@@ -46,6 +46,13 @@ def init_db() -> None:
                 switch_reason TEXT,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS feed_cache (
+                client_id TEXT NOT NULL,
+                corpus_version TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (client_id, corpus_version)
+            );
             """
         )
 

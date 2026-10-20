@@ -154,7 +154,7 @@ dd {
   font-size: 0.75rem;
 }
 
-.hits p {
-  margin: 0.25rem 0 0;
-  color: #444;
+.feed h3 {
+  margin: 1rem 0 0.4rem;
+  font-size: 1rem;
 }

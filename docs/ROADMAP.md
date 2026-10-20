@@ -26,9 +26,9 @@
 - [x] Тест: новость про 14% имеет тип `monetary_policy`
 
 ## Этап 3. Лента
-- [ ] Скоринг по `config/scoring.yaml` без модели
-- [ ] `GET /api/clients/{id}/feed` и блок «Менее значимо»
-- [ ] Тест: ставка объяснена `rate_borrower` или `rate_saver`
+- [x] Скоринг по `config/scoring.yaml` без модели
+- [x] `GET /api/clients/{id}/feed` и блок «Менее значимо»
+- [x] Тест: ставка объяснена `rate_borrower` или `rate_saver`
 
 ## Этап 4. Карточка на заглушке
 - [ ] Схема карточки

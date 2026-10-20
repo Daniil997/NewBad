@@ -140,10 +140,24 @@ function HitList({ hits }: { hits: SearchHit[] }) {
   );
 }
 
+type FeedItem = {
+  news_id: string;
+  title: string;
+  score: number;
+  matched_features: string[];
+  reason: string;
+};
+
+type Feed = {
+  top: FeedItem[];
+  less_relevant: FeedItem[];
+};
+
 function Clients() {
   const [clients, setClients] = useState<ClientSummary[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [profile, setProfile] = useState<ClientProfile | null>(null);
+  const [feed, setFeed] = useState<Feed | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -183,6 +197,19 @@ function Clients() {
           setError(reason instanceof Error ? reason.message : "Не удалось загрузить профиль");
         }
       });
+    void fetch(`/api/clients/${selected}/feed`, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Лента: ${response.status}`);
+        }
+        return response.json() as Promise<Feed>;
+      })
+      .then(setFeed)
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted) {
+          setError(reason instanceof Error ? reason.message : "Не удалось загрузить ленту");
+        }
+      });
     return () => controller.abort();
   }, [selected]);
 
@@ -204,7 +231,36 @@ function Clients() {
         ))}
       </div>
       {profile ? <ProfileDetails profile={profile} /> : null}
+      {feed ? <FeedList feed={feed} /> : null}
     </section>
+  );
+}
+
+function FeedList({ feed }: { feed: Feed }) {
+  return (
+    <div className="feed">
+      <h3>Важно для компании</h3>
+      <FeedItems items={feed.top} />
+      <h3>Менее значимо для вас</h3>
+      <FeedItems items={feed.less_relevant} />
+    </div>
+  );
+}
+
+function FeedItems({ items }: { items: FeedItem[] }) {
+  if (items.length === 0) {
+    return <p>Пусто.</p>;
+  }
+  return (
+    <ul className="hits">
+      {items.map((item) => (
+        <li key={item.news_id}>
+          <strong>{item.title}</strong>
+          <span>{item.score.toFixed(2)}</span>
+          <p>{item.reason}</p>
+        </li>
+      ))}
+    </ul>
   );
 }
 

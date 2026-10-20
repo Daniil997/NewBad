@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException
 from app.corpus.search import SearchHit, load_news, search_bank_analytics, search_news
 from app.db import init_db, journal_is_empty, journal_tables
 from app.profile.build import ClientProfile, ClientSummary, get_profile, load_profiles
+from app.scoring.feed import Feed, build_feed
 
 
 @asynccontextmanager
@@ -27,6 +28,14 @@ def clients() -> list[ClientSummary]:
         )
         for profile in load_profiles()
     ]
+
+
+@app.get("/api/clients/{client_id}/feed")
+def client_feed(client_id: str) -> Feed:
+    feed = build_feed(client_id)
+    if feed is None:
+        raise HTTPException(status_code=404, detail="Компания не найдена")
+    return feed
 
 
 @app.get("/api/clients/{client_id}")
