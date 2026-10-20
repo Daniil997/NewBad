@@ -49,7 +49,7 @@ QUESTION = {
 }
 
 
-def assemble(ctx: AgentContext) -> Card:
+def assemble(ctx: AgentContext, copy: dict[str, str] | None = None) -> Card:
     profile = ctx.profile
     news = ctx.news
     if profile is None or news is None or ctx.plan is None:
@@ -61,7 +61,7 @@ def assemble(ctx: AgentContext) -> Card:
     sources = _sources(ctx, feature_refs)
     fact = Claim(
         id="fact-1",
-        text=news.excerpt,
+        text=ctx.extracted_fact or news.excerpt,
         layer="confirmed_fact",
         source_refs=[news.id],
         confidence=0.95,
@@ -90,12 +90,15 @@ def assemble(ctx: AgentContext) -> Card:
         missing.append("Нет материала банка по теме события.")
     why = Claim(
         id="why-1",
-        text=_why_text(primary),
+        text=(copy or {}).get("why") or _why_text(primary),
         layer="model_inference",
         source_refs=[news.id],
         feature_refs=feature_refs,
         confidence=0.7,
     )
+    risk = (copy or {}).get("risk") or RISK.get(primary or "", _fallback_risk())
+    chance = (copy or {}).get("opportunity") or OPPORTUNITY.get(primary or "", _fallback_chance())
+    question = (copy or {}).get("question") or QUESTION.get(primary or "", "Нужно ли учитывать это событие в ближайшем решении?")
     return Card(
         card_id=f"{profile.client_id}-{news.id}",
         client_id=profile.client_id,
@@ -111,15 +114,13 @@ def assemble(ctx: AgentContext) -> Card:
         what_happened=WhatHappened(claims=claims, assumptions=assumptions),
         why_for_company=WhyForCompany(claims=[why]),
         consequences=Consequences(
-            risks=[_inference("risk-1", RISK.get(primary or "", _fallback_risk()), news.id, feature_refs)],
-            opportunities=[
-                _inference("chance-1", OPPORTUNITY.get(primary or "", _fallback_chance()), news.id, feature_refs)
-            ],
+            risks=[_inference("risk-1", risk, news.id, feature_refs)],
+            opportunities=[_inference("chance-1", chance, news.id, feature_refs)],
             depends_on=assumptions,
         ),
         action=Action(
-            next_step=_step(primary, rate),
-            questions=[QUESTION.get(primary or "", "Нужно ли учитывать это событие в ближайшем решении?")],
+            next_step=(copy or {}).get("next_step") or _step(primary, rate),
+            questions=[question],
         ),
         bank_view=bank_view,
         sources=sources,
@@ -130,7 +131,10 @@ def assemble(ctx: AgentContext) -> Card:
 
 
 def draft_card(ctx: AgentContext) -> Card:
-    return assemble(ctx)
+    from app.agent.generate import request_copy
+
+    copy = request_copy(ctx) if ctx.plan is not None and ctx.plan.provider == "local" else None
+    return assemble(ctx, copy)
 
 
 def _why_text(primary: str | None) -> str:

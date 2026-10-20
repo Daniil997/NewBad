@@ -43,6 +43,7 @@ def test_chat_and_steps_follow_the_card(monkeypatch, tmp_path):
     assert settings.json()["mode"] == "mock"
     assert settings.json()["weights_from_browser"] is False
     assert settings.json()["active_generation"] == "mock"
+    assert settings.json()["placement"]
 
 
 def test_pasted_news_builds_card_without_joining_the_feed(monkeypatch, tmp_path):

@@ -1,5 +1,7 @@
 from pydantic import BaseModel
 
+from app.agent.generate import answer_with_model
+from app.llm.router import current_route
 from app.schemas.card import Card
 from app.tracing.journal import log_llm_call
 
@@ -14,10 +16,18 @@ def answer_from_card(card: Card, question: str) -> ChatReply:
     cleaned = question.strip()
     if not cleaned:
         raise ValueError("Пустой вопрос")
-    log_llm_call("mock-model", "mock", "mock", tokens=0)
-    text = _pick(card, cleaned.lower())
     source_ids = [item.id for item in card.sources if item.kind in {"news", "bank_analytics"}]
-    return ChatReply(answer=text, mode="mock", source_ids=source_ids)
+    model_answer = answer_with_model(cleaned, _card_text(card))
+    if model_answer:
+        return ChatReply(answer=model_answer, mode=current_route().mode, source_ids=source_ids)
+    log_llm_call("mock-model", "mock", "mock", tokens=0)
+    return ChatReply(answer=_pick(card, cleaned.lower()), mode="mock", source_ids=source_ids)
+
+
+def _card_text(card: Card) -> str:
+    parts = [claim.text for claim in card.all_claims()]
+    parts.extend([card.action.next_step, card.bank_view.quote, *card.action.questions])
+    return " ".join(parts)
 
 
 def _pick(card: Card, question: str) -> str:

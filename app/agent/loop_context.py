@@ -17,3 +17,5 @@ class AgentContext:
     matched: list[str] = field(default_factory=list)
     plan: PlanChoice | None = None
     retries: int = 0
+    issues: list[str] = field(default_factory=list)
+    extracted_fact: str | None = None

@@ -12,6 +12,8 @@ from app.db import init_db, journal_is_empty, journal_tables
 from app.profile.build import ClientProfile, ClientSummary, get_profile, load_profiles
 from app.schemas.card import Card
 from app.scoring.feed import Feed, build_feed
+from app.llm.placement import decide, placement_label
+from app.llm.router import current_route, local_status
 from app.tracing.journal import latest_steps
 
 
@@ -61,6 +63,8 @@ class SettingsView(BaseModel):
     active_generation: str
     model: str
     weights_from_browser: bool
+    local_server: str
+    placement: str
 
 
 @app.post("/api/clients/{client_id}/events/{event_id}/card")
@@ -105,13 +109,18 @@ def paste_news(client_id: str, body: PasteNews) -> Card:
 
 @app.get("/api/settings")
 def settings() -> SettingsView:
-    mode = os.environ.get("LLM_MODE", "mock")
+    route = current_route()
+    server = local_status()
+    active = route.mode if server == "up" else "mock"
+    place, free = decide()
     return SettingsView(
-        mode=mode,
+        mode=os.environ.get("LLM_MODE", "mock"),
         allow_cloud=os.environ.get("ALLOW_CLOUD", "false").lower() == "true",
-        active_generation="mock",
-        model="mock-model",
+        active_generation=active,
+        model=route.model if route.provider == "local" else "mock-model",
         weights_from_browser=False,
+        local_server=server,
+        placement=placement_label(place, free),
     )
 
 

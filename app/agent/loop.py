@@ -1,4 +1,7 @@
+import time
+
 from app.agent.draft import assemble, draft_card
+from app.agent.generate import extract_fact
 from app.agent.loop_context import AgentContext
 from app.agent.tools import (
     bank_query,
@@ -21,6 +24,7 @@ def build_card(client_id: str, event_id: str) -> Card | None:
     if find_news(event_id) is None:
         return None
     ctx = AgentContext(client_id=client_id, event_id=event_id)
+    started = time.perf_counter()
     _plan(ctx)
     _gather(ctx)
     card = draft_card(ctx)
@@ -29,6 +33,7 @@ def build_card(client_id: str, event_id: str) -> Card | None:
     log_step(client_id, event_id, "VERIFY", {"issues": issues})
     while issues and ctx.retries < max_retries():
         ctx.retries += 1
+        ctx.issues = issues
         log_step(client_id, event_id, "REVISE", {"retry": ctx.retries, "issues": issues})
         card = draft_card(ctx)
         card.llm_trace.retries = ctx.retries
@@ -44,7 +49,9 @@ def build_card(client_id: str, event_id: str) -> Card | None:
         issues = verify_card(card, ctx)
     if issues:
         raise RuntimeError(f"Карточка не прошла проверку: {issues}")
-    log_step(client_id, event_id, "FINALIZE", {"retries": ctx.retries})
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    card.llm_trace.latency_ms = elapsed_ms
+    log_step(client_id, event_id, "FINALIZE", {"retries": ctx.retries, "elapsed_ms": elapsed_ms})
     return card
 
 
@@ -81,6 +88,8 @@ def _gather(ctx: AgentContext) -> None:
             run_tool(name, {"client_id": ctx.client_id})
             fresh = get_profile(ctx.client_id)
             ctx.counterparties = [] if fresh is None else list(fresh.counterparties)
+    if ctx.news is not None and ctx.news.id.startswith("pasted-") and ctx.plan is not None and ctx.plan.provider == "local":
+        ctx.extracted_fact = extract_fact(ctx.news)
     log_step(
         ctx.client_id,
         ctx.event_id,

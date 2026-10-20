@@ -71,6 +71,7 @@ class LlmTrace(BaseModel):
     mode: str
     tokens: int = 0
     retries: int = 0
+    latency_ms: int = 0
 
 
 class Card(BaseModel):

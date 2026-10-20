@@ -17,13 +17,20 @@ def log_tool_call(tool: str, arguments: dict, result: object) -> None:
     )
 
 
-def log_llm_call(model: str, provider: str, mode: str, tokens: int = 0, switch_reason: str | None = None) -> None:
+def log_llm_call(
+    model: str,
+    provider: str,
+    mode: str,
+    tokens: int = 0,
+    latency_ms: int = 0,
+    switch_reason: str | None = None,
+) -> None:
     _insert(
         """
         INSERT INTO llm_calls (model, provider, mode, tokens, latency_ms, prompt_hash, switch_reason, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (model, provider, mode, tokens, 0, None, switch_reason, _now()),
+        (model, provider, mode, tokens, latency_ms, None, switch_reason, _now()),
     )
 
 

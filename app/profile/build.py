@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from app.db import ROOT
 from app.profile.sources import companies_csv, payments_csv, read_csv
 
-FLAG_ON = {"1", "true", "y", "yes", "да"}
+FLAG_ON = {"1", "1.0", "true", "y", "yes", "да"}
 
 FIELD_LABELS = {
     "ORG_TYPE": "Тип организации",
@@ -80,6 +80,10 @@ class ClientSummary(BaseModel):
 
 
 def load_profiles() -> list[ClientProfile]:
+    if _using_case():
+        from app.profile.case_data import load_case_profiles
+
+        return load_case_profiles()
     company_path = companies_csv()
     if not company_path.is_file():
         raise FileNotFoundError(f"Нет файла компаний: {company_path}")
@@ -91,10 +95,20 @@ def load_profiles() -> list[ClientProfile]:
 
 
 def get_profile(client_id: str) -> ClientProfile | None:
+    if _using_case():
+        from app.profile.case_data import case_profile
+
+        return case_profile(client_id)
     for profile in load_profiles():
         if profile.client_id == client_id:
             return profile
     return None
+
+
+def _using_case() -> bool:
+    from app.profile.sources import using_case_extract
+
+    return using_case_extract()
 
 
 def _build_profiles(
@@ -220,6 +234,60 @@ def _build_profiles(
     return sorted(profiles, key=lambda item: item.client_id)
 
 
+def apply_case_stats(
+    profile: ClientProfile,
+    *,
+    cohort_share: float | None,
+    group_rank: int | None,
+    group_size: int | None,
+    persons: int,
+) -> ClientProfile:
+    """Подменяет доли, посчитанные по всей выгрузке, а не по одной строке."""
+    drop = {"cohort_share", "group_rank", "group_size", "related_persons"}
+    features = [feature for feature in profile.features if feature.id not in drop]
+    if cohort_share is not None:
+        features.append(
+            Feature(
+                id="cohort_share",
+                label="Доля выручки в когорте ОКВЭД среди клиентов банка",
+                value=str(cohort_share),
+                origin="derived",
+                source_fields=["REVENUE_COMPANY", "MAINOKVED_CODE"],
+            )
+        )
+    if group_rank is not None:
+        features.append(
+            Feature(
+                id="group_rank",
+                label="Место в группе по выручке",
+                value=str(group_rank),
+                origin="derived",
+                source_fields=["GROUP_ID", "REVENUE_COMPANY"],
+            )
+        )
+    if group_size is not None:
+        features.append(
+            Feature(
+                id="group_size",
+                label="Компаний в группе",
+                value=str(group_size),
+                origin="derived",
+                source_fields=["GROUP_ID"],
+            )
+        )
+    if persons:
+        features.append(
+            Feature(
+                id="related_persons",
+                label="Связанные физлица",
+                value=str(persons),
+                origin="bank_data",
+                source_fields=["SYNTHETIC_F"],
+            )
+        )
+    return profile.model_copy(update={"cohort_share": cohort_share, "features": features})
+
+
 def _exposures(row: dict[str, str], rules: dict, theme: str | None, counterparties: list[Counterparty]) -> list[Exposure]:
     found: list[Exposure] = []
     for exposure_id, rule in rules.items():
@@ -341,7 +409,13 @@ def _load_yaml(path: Path) -> dict:
 
 
 def _flag(value: str | None) -> bool:
-    return _text(value).lower() in FLAG_ON
+    text = _text(value).lower().replace(",", ".")
+    if text in FLAG_ON:
+        return True
+    try:
+        return float(text) == 1.0
+    except ValueError:
+        return False
 
 
 def _blank(value: str | None) -> bool:
