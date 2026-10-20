@@ -1,0 +1,13 @@
+# Local env at repo root (if used)
+.env
+.env.local
+!.env.example
+
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+.vscode/
+
+# Local helper: commit/push to develop (not shared)
+git-develop.ps1
