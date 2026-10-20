@@ -7,6 +7,18 @@ from app.db import ROOT
 from app.profile.sources import companies_csv, payments_csv, read_csv
 
 FLAG_ON = {"1", "1.0", "true", "y", "yes", "да"}
+FLAG_OFF = {"0", "0.0", "false", "n", "no", "нет"}
+FLAG_FIELDS = {
+    "NEGATIVEMARK",
+    "CL_PRODUCT_RKO_MARK",
+    "CL_PRODUCT_GAR_MARK",
+    "CL_PRODUCT_LOA_MARK",
+    "CL_PRODUCT_LEA_MARK",
+    "CL_PRODUCT_DEP_MARK",
+    "CL_PRODUCT_ZPP_MARK",
+    "FTS_FLAG",
+    "FACTORING_MARK",
+}
 
 FIELD_LABELS = {
     "ORG_TYPE": "Тип организации",
@@ -141,7 +153,13 @@ def _build_profiles(
         missing: list[str] = []
         for field in WATCHED_FIELDS:
             raw = row.get(field)
-            if _blank(raw):
+            if field in FLAG_FIELDS:
+                value = _mark(raw)
+            elif _blank(raw):
+                value = None
+            else:
+                value = _text(raw)
+            if value is None:
                 if _counts_as_missing(field, row):
                     missing.append(field)
                 continue
@@ -149,7 +167,7 @@ def _build_profiles(
                 Feature(
                     id=field,
                     label=FIELD_LABELS[field],
-                    value=_text(raw),
+                    value=value,
                     origin="bank_data",
                     source_fields=[field],
                 )
@@ -392,11 +410,14 @@ def _theme(code: str, prefixes: dict[str, str]) -> str | None:
 
 
 def _group_rank(client_id: str, group: str, companies: dict[str, dict[str, str]]) -> int:
-    members = [
-        (cid, _money(row.get("REVENUE_COMPANY")) or -1)
-        for cid, row in companies.items()
-        if _text(row.get("GROUP_ID")) == group
-    ]
+    members = []
+    for cid, row in companies.items():
+        if _text(row.get("GROUP_ID")) != group:
+            continue
+        revenue = _money(row.get("REVENUE_COMPANY"))
+        if revenue is None:
+            continue
+        members.append((cid, revenue))
     members.sort(key=lambda item: item[1], reverse=True)
     for index, (cid, _revenue) in enumerate(members, start=1):
         if cid == client_id:
@@ -417,6 +438,23 @@ def _sum_by(rows, key_of, value_of) -> dict[str, float]:
 
 def _load_yaml(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def _mark(value: str | None) -> str | None:
+    """Пустая ячейка — не факт. Явный 0 остаётся «нет», а не пропуском и не нулём."""
+    text = _text(value).lower().replace(",", ".")
+    if not text:
+        return None
+    if _flag(value):
+        return "есть"
+    if text in FLAG_OFF:
+        return "нет"
+    try:
+        if float(text) == 0.0:
+            return "нет"
+    except ValueError:
+        return None
+    return None
 
 
 def _flag(value: str | None) -> bool:

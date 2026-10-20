@@ -1,7 +1,8 @@
 from fastapi.testclient import TestClient
 
+from app.db import ROOT
 from app.main import app
-from app.profile.build import load_profiles
+from app.profile.build import WATCHED_FIELDS, _build_profiles, _load_yaml, load_profiles
 
 
 def test_borrower_and_saver_have_different_exposures():
@@ -41,6 +42,66 @@ def test_cohort_share_and_payments():
     outside = next(item for item in borrower.counterparties if item.client_id == "U-SAVER")
     assert inside.same_group is True
     assert outside.same_group is False
+
+
+def _built(code: str, **fields: str):
+    rules = _load_yaml(ROOT / "config" / "exposures.yaml")["exposures"]
+    prefixes = _load_yaml(ROOT / "config" / "okved_map.yaml")["prefixes"]
+    row = {field: "" for field in WATCHED_FIELDS}
+    row.update(SYNTHETIC_U="U-X", MAINOKVED_CODE=code, MAINOKVED_NAME="Проверка", **fields)
+    return _build_profiles([row], [], rules, prefixes)[0]
+
+
+def test_profile_keeps_facts_calculations_and_hypotheses_apart():
+    borrower = next(item for item in load_profiles() if item.client_id == "U-BORROWER")
+    facts = {item.id: item for item in borrower.features}
+
+    assert facts["MAINOKVED_NAME"].value == "Производство чугуна и стали"
+    assert facts["MAINOKVED_NAME"].origin == "bank_data"
+    assert facts["MAINOKVED_NAME"].source_fields == ["MAINOKVED_NAME"]
+    assert facts["COMPANY_AGE_YEARS_GRADATION"].value == "10-15 лет"
+    assert facts["AMOUNT_WORKERS_FNS_GRADATION"].value == "1000-5000"
+    assert facts["REVENUE_COMPANY"].value == "20000000000"
+    assert facts["CITY"].value == "Москва"
+    assert "REGION" not in facts
+    assert facts["CL_PRODUCT_LOA_MARK"].value == "есть"
+    assert facts["CL_PRODUCT_LOA_MARK"].source_fields == ["CL_PRODUCT_LOA_MARK"]
+    assert facts["CL_PRODUCT_DEP_MARK"].value == "нет"
+    assert "CL_PRODUCT_DEP_MARK" not in borrower.missing_data
+    assert facts["okved_theme"].value == "metals"
+    assert facts["okved_theme"].origin == "derived"
+    assert facts["okved_theme"].source_fields == ["MAINOKVED_CODE"]
+
+    borrower_rule = next(item for item in borrower.exposures if item.id == "rate_borrower")
+    assert "CL_PRODUCT_LOA_MARK" in borrower_rule.feature_refs
+    assert "CL_PRODUCT_LEA_MARK" in borrower_rule.feature_refs
+    assert borrower_rule.assumptions
+    assert all(item.value != borrower_rule.assumptions[0] for item in borrower.features)
+    assert "rate_saver" not in {item.id for item in borrower.exposures}
+
+
+def test_unknown_industry_does_not_invent_exposure():
+    unknown = _built("99.99")
+    assert all(item.id != "okved_theme" for item in unknown.features)
+    assert "REVENUE_COMPANY" in unknown.missing_data
+    assert "CL_PRODUCT_LOA_MARK" in unknown.missing_data
+    assert all(item.value not in {"0", "0.0", "нет"} for item in unknown.features)
+    assert unknown.cohort_share is None
+    ids = {item.id for item in unknown.exposures}
+    assert "commodity_metals" not in ids
+    assert "commodity_energy" not in ids
+    assert "commodity_precious" not in ids
+    assert "consumption" not in ids
+    assert "rate_borrower" not in ids
+
+    precious = _built("24.41")
+    theme = next(item for item in precious.features if item.id == "okved_theme")
+    assert theme.value == "precious_metals"
+    assert theme.origin == "derived"
+    assert theme.source_fields == ["MAINOKVED_CODE"]
+    precious_ids = {item.id for item in precious.exposures}
+    assert "commodity_precious" in precious_ids
+    assert "commodity_metals" not in precious_ids
 
 
 def test_client_api():
