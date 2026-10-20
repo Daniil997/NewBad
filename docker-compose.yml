@@ -1,5 +1,7 @@
-# Запуск: docker compose up --build
-# Локальная модель на CPU: docker compose --profile llm-cpu up --build
+# Запуск приложения: docker compose up --build
+# Локальная модель считается отдельно, на дискретной видеокарте NVIDIA:
+# llama-server на хосте, адрес LOCAL_LLM_BASE_URL.
+# Расчёт на процессоре и на встроенной графике не используем.
 services:
   app:
     build: .
@@ -18,13 +20,3 @@ services:
     volumes:
       - ./data:/srv/data
       - ./config:/srv/config
-
-  llm-cpu:
-    profiles: ['llm-cpu']
-    # Проверить актуальный тег образа llama.cpp перед использованием
-    image: ghcr.io/ggml-org/llama.cpp:server
-    command: ['-m', '/models/${LLM_GGUF_FILE:-model.gguf}', '--host', '0.0.0.0', '--port', '8080', '-c', '4096']
-    volumes:
-      - ./models:/models:ro
-    ports:
-      - '8080:8080'

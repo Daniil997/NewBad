@@ -2,7 +2,7 @@
 
 Прототип сервиса новостной аналитики для руководителей крупного бизнеса (Альфа-Хак 2026, кейс Changellenge × Альфа-Банк). Сервис выбирает внешние события под конкретную компанию и показывает три отдельных слоя: факт из новости, позицию аналитиков банка и вывод модели.
 
-**Статус:** каркас `v0.1.0-scaffold`. Готовы LLM-слой (провайдеры, режимы, кэш, бюджет, белый список моделей), схема карточки с проверками трассируемости и журнал вызовов. Остальные модули — заглушки, порядок работ в [docs/ROADMAP.md](docs/ROADMAP.md).
+**Статус:** этап 0 готов. API отвечает на `/api/health`, страница на Vite показывает этот ответ. Дальше — этап 1 в [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Быстрый старт
 
@@ -11,7 +11,7 @@ python -m venv .venv
 . .venv/bin/activate        # Windows PowerShell: .venv/Scripts/Activate.ps1
 pip install -r requirements-dev.txt
 pytest
-uvicorn app.main:app --reload
+.\scripts\dev.ps1          # API :8000 и интерфейс :5173
 ```
 
 Документация API: http://localhost:8000/docs. Через Docker: `docker compose up --build`. По умолчанию режим `mock`: ни ключ, ни видеокарта не нужны.
@@ -44,7 +44,7 @@ data/       raw (не в git), demo, news, bank, cache
 docs/       архитектура, схема карточки, план работ
 eval/       набор оценки и метрики
 scripts/    служебные скрипты
-ui/         интерфейс (стек выбираем на этапе 5)
+ui/         интерфейс: TypeScript, React, Vite (этап 5)
 models/     веса GGUF (не в git)
 tests/
 ```
