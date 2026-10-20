@@ -158,3 +158,224 @@ dd {
   margin: 1rem 0 0.4rem;
   font-size: 1rem;
 }
+
+.hits button.event {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.hits button.event.active strong {
+  color: #ef3124;
+}
+
+.insight {
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #eee;
+}
+
+.insight h4 {
+  margin: 0.8rem 0 0.25rem;
+  font-size: 0.95rem;
+}
+
+.insight blockquote {
+  margin: 0.3rem 0;
+  padding-left: 0.7rem;
+  border-left: 3px solid #ef3124;
+}
+
+.insight .meta {
+  color: #777;
+  font-size: 0.8rem;
+}
+
+.bank-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #ef3124;
+  color: #fff;
+  padding: 0.9rem 1.4rem;
+}
+
+.bank-bar strong,
+.bar-button {
+  color: #fff;
+  background: transparent;
+  border: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.bank-main {
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 1.4rem;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+}
+
+.tiles article {
+  background: #fff;
+  border-radius: 16px;
+  padding: 1rem 1.1rem;
+}
+
+.tiles h2,
+.tiles p {
+  margin: 0;
+}
+
+.tiles p {
+  color: #666;
+  margin-top: 0.3rem;
+}
+
+.widget {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: #fff;
+  border: 0;
+  border-left: 6px solid #ef3124;
+  border-radius: 16px;
+  padding: 1.2rem 1.3rem;
+  cursor: pointer;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 6%);
+}
+
+.widget strong {
+  display: block;
+  font-size: 1.45rem;
+  margin: 0.2rem 0;
+}
+
+.widget em {
+  color: #444;
+  font-style: normal;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 20rem 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+.insight h2 {
+  margin-top: 1rem;
+}
+
+.badge {
+  display: inline-block;
+  margin-right: 0.35rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  background: #f4f1ea;
+}
+
+.badge-confirmed_fact {
+  background: #e7f6ec;
+}
+
+.badge-bank_position {
+  background: #fde8e6;
+}
+
+.badge-model_inference {
+  background: #e8eefc;
+}
+
+.note {
+  color: #555;
+}
+
+.source-link,
+.linkish {
+  background: transparent;
+  border: 0;
+  color: #ef3124;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.trace {
+  margin-top: 0.6rem;
+  padding: 0.7rem 0.8rem;
+  background: #faf8f4;
+  border-radius: 12px;
+}
+
+.chat form,
+.paste {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.chat form,
+.quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.quick button,
+.chat form button,
+.paste button {
+  border: 0;
+  background: #ef3124;
+  color: #fff;
+  border-radius: 10px;
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+}
+
+.chat input,
+.paste input,
+.paste textarea {
+  width: 100%;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+}
+
+.paste {
+  margin-top: 1rem;
+}
+
+.messages {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+}
+
+.messages li {
+  padding: 0.35rem 0;
+}
+
+.messages .user {
+  color: #666;
+}
+
+@media (max-width: 800px) {
+  .workspace,
+  .tiles {
+    grid-template-columns: 1fr;
+  }
+}

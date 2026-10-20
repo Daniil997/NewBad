@@ -53,6 +53,24 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (client_id, corpus_version)
             );
+            CREATE TABLE IF NOT EXISTS agent_steps (
+                id INTEGER PRIMARY KEY,
+                client_id TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                step TEXT NOT NULL,
+                detail TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS pasted_news (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                excerpt TEXT NOT NULL,
+                url TEXT NOT NULL,
+                event_type TEXT,
+                event_title TEXT,
+                published_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
             """
         )
 

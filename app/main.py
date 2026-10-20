@@ -1,11 +1,18 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
+from app.agent.chat import ChatReply, answer_from_card
+from app.agent.loop import build_card
+from app.agent.pasted import remember_pasted
 from app.corpus.search import SearchHit, load_news, search_bank_analytics, search_news
 from app.db import init_db, journal_is_empty, journal_tables
 from app.profile.build import ClientProfile, ClientSummary, get_profile, load_profiles
+from app.schemas.card import Card
 from app.scoring.feed import Feed, build_feed
+from app.tracing.journal import latest_steps
 
 
 @asynccontextmanager
@@ -36,6 +43,76 @@ def client_feed(client_id: str) -> Feed:
     if feed is None:
         raise HTTPException(status_code=404, detail="Компания не найдена")
     return feed
+
+
+class PasteNews(BaseModel):
+    title: str
+    text: str
+    url: str = ""
+
+
+class ChatQuestion(BaseModel):
+    question: str
+
+
+class SettingsView(BaseModel):
+    mode: str
+    allow_cloud: bool
+    active_generation: str
+    model: str
+    weights_from_browser: bool
+
+
+@app.post("/api/clients/{client_id}/events/{event_id}/card")
+def event_card(client_id: str, event_id: str) -> Card:
+    card = build_card(client_id, event_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Компания или событие не найдены")
+    return card
+
+
+@app.get("/api/clients/{client_id}/events/{event_id}/steps")
+def event_steps(client_id: str, event_id: str) -> dict[str, list[str]]:
+    if get_profile(client_id) is None:
+        raise HTTPException(status_code=404, detail="Компания не найдена")
+    return {"steps": latest_steps(client_id, event_id)}
+
+
+@app.post("/api/clients/{client_id}/events/{event_id}/chat")
+def event_chat(client_id: str, event_id: str, body: ChatQuestion) -> ChatReply:
+    card = build_card(client_id, event_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Компания или событие не найдены")
+    try:
+        return answer_from_card(card, body.question)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/clients/{client_id}/news")
+def paste_news(client_id: str, body: PasteNews) -> Card:
+    if get_profile(client_id) is None:
+        raise HTTPException(status_code=404, detail="Компания не найдена")
+    try:
+        item = remember_pasted(body.title, body.text, body.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    card = build_card(client_id, item.id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Не удалось собрать карточку")
+    return card
+
+
+@app.get("/api/settings")
+def settings() -> SettingsView:
+    mode = os.environ.get("LLM_MODE", "mock")
+    return SettingsView(
+        mode=mode,
+        allow_cloud=os.environ.get("ALLOW_CLOUD", "false").lower() == "true",
+        active_generation="mock",
+        model="mock-model",
+        weights_from_browser=False,
+    )
 
 
 @app.get("/api/clients/{client_id}")
