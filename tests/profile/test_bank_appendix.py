@@ -82,4 +82,4 @@ def test_real_appendix_lists_nine_files_without_processing():
     assert by_id["key_rate"].date == "2026-09-11"
     assert by_id["consumption"].date == "unknown"
     assert by_id["steels"].date == "2021-04-15"
-    assert by_id["inflation"].date == "2026-08"
+    assert by_id["inflation"].date == "2026-09-02"
