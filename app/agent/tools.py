@@ -1,9 +1,11 @@
 from pathlib import Path
+from typing import Literal
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.agent.pasted import pasted_by_id
-from app.corpus.search import NewsItem, load_bank_documents, load_news, search_bank_analytics, search_news
+from app.corpus.search import CorpusError, NewsItem, load_bank_documents, load_news, search_bank_analytics, search_news
 from app.db import ROOT
 from app.profile.build import ClientProfile, get_profile
 from app.tracing.journal import log_tool_call
@@ -11,27 +13,55 @@ from app.tracing.journal import log_tool_call
 _UP = ("рост", "повыш", "выше", "ускор", "увелич")
 _DOWN = ("сниж", "ниже", "замедл", "паден", "сокращ", "дефляц")
 _NONE = "Нет релевантных материалов банка по этому запросу."
+_PARAMS = {
+    "get_profile": "client_id",
+    "get_counterparties": "client_id",
+    "search_news": "query",
+    "search_bank_analytics": "query",
+}
 
 ALLOWED_TOOLS = ("get_profile", "search_news", "search_bank_analytics", "get_counterparties")
 
 
-def run_tool(name: str, arguments: dict) -> object:
-    if name not in ALLOWED_TOOLS:
-        raise ValueError(f"Инструмент не из белого списка: {name}")
-    if name == "get_profile":
-        profile = get_profile(str(arguments["client_id"]))
-        result = None if profile is None else profile.model_dump()
-    elif name == "search_news":
-        result = _search_news(str(arguments["query"]))
-    elif name == "search_bank_analytics":
-        result = bank_analytics(str(arguments["query"]))
-    elif name == "get_counterparties":
-        profile = get_profile(str(arguments["client_id"]))
-        result = [] if profile is None else [item.model_dump() for item in profile.counterparties]
-    else:
-        result = None
-    log_tool_call(name, arguments, result)
-    return result
+class Evidence(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    evidence_id: str = Field(min_length=1)
+    source: str = Field(min_length=1)
+
+
+class ToolResult(BaseModel):
+    tool: Literal["get_profile", "search_news", "search_bank_analytics", "get_counterparties"]
+    status: Literal["ok", "none", "error"]
+    evidence_id: str = ""
+    source: str = Field(min_length=1)
+    message: str = ""
+    items: list[Evidence] = Field(default_factory=list)
+
+    def model_post_init(self, _context: object) -> None:
+        if self.status == "ok" and (not self.evidence_id or not self.items):
+            raise ValueError("Успешный результат без доказательства")
+        if self.status == "none" and self.items:
+            raise ValueError("Пустой результат не должен содержать доказательства")
+
+
+def run_tool(name: str, arguments: dict) -> dict:
+    stored = arguments if isinstance(arguments, dict) else {}
+    try:
+        cleaned = _checked_arguments(name, arguments)
+    except ValueError as error:
+        log_tool_call(str(name), stored, {"status": "error", "message": str(error)})
+        raise
+    try:
+        checked = ToolResult.model_validate(_call(name, cleaned)).model_dump()
+    except CorpusError as error:
+        log_tool_call(name, cleaned, {"status": "error", "message": str(error)})
+        raise
+    except (ValidationError, ValueError) as error:
+        log_tool_call(name, cleaned, {"status": "error", "message": "Некорректный формат результата"})
+        raise ValueError("Результат инструмента не прошёл проверку формата") from error
+    log_tool_call(name, cleaned, checked)
+    return checked
 
 
 def bank_query(event_type: str | None, title: str) -> str:
@@ -70,16 +100,16 @@ def find_news(event_id: str) -> NewsItem | None:
 def _search_news(query: str) -> list[dict]:
     exact = find_news(query)
     if exact is not None:
-        return [
-            {
-                "id": exact.id,
-                "title": exact.title,
-                "excerpt": exact.excerpt,
-                "event_type": exact.event_type,
-                "url": exact.url,
-            }
-        ]
-    return [hit.model_dump() for hit in search_news(query)]
+        hit = {
+            "id": exact.id,
+            "title": exact.title,
+            "excerpt": exact.excerpt,
+            "event_type": exact.event_type,
+            "url": exact.url,
+            "source_name": exact.source,
+        }
+        return [_evidence(hit, exact.id, _news_source(hit))]
+    return [_evidence(hit.model_dump(), hit.id, _news_source(hit.model_dump())) for hit in search_news(query)]
 
 
 def bank_analytics(query: str, folder: Path | None = None) -> dict:
@@ -110,6 +140,81 @@ def find_bank(doc_id: str, page: int | None = None):
             continue
         return document
     return None
+
+
+def _checked_arguments(name: str, arguments: dict) -> dict:
+    if name not in ALLOWED_TOOLS:
+        raise ValueError(f"Инструмент не из белого списка: {name}")
+    if not isinstance(arguments, dict):
+        raise ValueError("Аргументы инструмента должны быть словарём")
+    key = _PARAMS[name]
+    if set(arguments) != {key}:
+        raise ValueError(f"Инструмент {name} принимает только параметр {key}")
+    value = arguments.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"У инструмента {name} пустой параметр {key}")
+    cleaned = value.strip()
+    limit = 64 if key == "client_id" else 500
+    if len(cleaned) > limit:
+        raise ValueError(f"Параметр {key} длиннее {limit} символов")
+    return {key: cleaned}
+
+
+def _call(name: str, arguments: dict) -> dict:
+    if name == "get_profile":
+        return _profile_result(arguments["client_id"])
+    if name == "search_news":
+        items = _search_news(arguments["query"])
+        return _envelope(name, "news", items, "" if items else "Поиск не нашёл записей.")
+    if name == "search_bank_analytics":
+        found = bank_analytics(arguments["query"])
+        items = [
+            _evidence(hit, f"{hit['id']}:{hit['page']}", str(hit.get("source_type") or "bank_analytics"))
+            for hit in found["hits"]
+        ]
+        return _envelope(name, "bank_analytics", items, str(found.get("message") or ""))
+    return _counterparty_result(arguments["client_id"])
+
+
+def _profile_result(client_id: str) -> dict:
+    profile = get_profile(client_id)
+    if profile is None:
+        return _envelope("get_profile", "company_profile", [], "Компания не найдена.")
+    item = _evidence(profile.model_dump(), profile.client_id, "company_profile")
+    return _envelope("get_profile", "company_profile", [item], evidence_id=profile.client_id)
+
+
+def _counterparty_result(client_id: str) -> dict:
+    profile = get_profile(client_id)
+    if profile is None:
+        return _envelope("get_counterparties", "payments", [], "Компания не найдена.")
+    items = [
+        _evidence(item.model_dump(), f"{item.client_id}:{item.direction}", "payments")
+        for item in profile.counterparties
+    ]
+    message = "" if items else "Контрагенты не найдены."
+    return _envelope("get_counterparties", "payments", items, message, evidence_id=client_id if items else "")
+
+
+def _envelope(tool: str, source: str, items: list[dict], message: str = "", evidence_id: str = "") -> dict:
+    return {
+        "tool": tool,
+        "status": "ok" if items else "none",
+        "evidence_id": evidence_id or (items[0]["evidence_id"] if items else ""),
+        "source": source,
+        "message": message,
+        "items": items,
+    }
+
+
+def _evidence(payload: dict, evidence_id: str, source: str) -> dict:
+    return {"evidence_id": evidence_id, "source": source, **payload}
+
+
+def _news_source(hit: dict) -> str:
+    name = str(hit.get("source_name") or hit.get("source") or "").strip()
+    url = str(hit.get("url") or "").strip()
+    return name or url or "news"
 
 
 def _conflict(hits: list[dict]) -> str | None:

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from app.agent.loop_context import AgentContext
-from app.profile.build import Feature
+from app.profile.build import FIELD_LABELS, Feature
 from app.schemas.card import (
     Action,
     BankView,
@@ -31,21 +31,61 @@ WHY = {
 RISK = {
     "rate_borrower": "Стоимость обслуживания кредита не снижается, пока ставка сохранена.",
     "rate_saver": "Доходность размещения пересмотрят только после нового решения по ставке.",
+    "fx_exposure": "Расчёты зависят от курса, потому что в профиле указана доля валютной выручки.",
+    "country_exposure": "Событие важно для страны, которая указана во внешней торговле компании.",
+    "commodity_metals": "Цена металла может изменить операции, потому что отрасль компании связана с металлами.",
+    "commodity_energy": "Цена энергоносителя может изменить операции, потому что отрасль компании связана с энергией.",
+    "commodity_precious": "Цена драгметалла может изменить операции, потому что отрасль компании с ними связана.",
+    "consumption": "Спрос может изменить выручку, потому что деятельность компании связана с торговлей.",
+    "sector_regulation": "Нагрузка может измениться, потому что у компании указан ОКВЭД.",
+    "foreign_trade": "Ограничение может затронуть поставки, потому что у компании есть внешняя торговля.",
+    "liquidity_factoring": "Ликвидность может измениться, потому что у компании подключён факторинг.",
+    "counterparty": "Платежи могут измениться, если новость касается контрагента компании.",
 }
 
 OPPORTUNITY = {
     "rate_borrower": "Есть время пересчитать график кредита до следующего решения по ставке.",
     "rate_saver": "Размещение можно продлить, пока доходность не пересмотрена.",
+    "fx_exposure": "Можно сверить валютную долю выручки с курсом из новости.",
+    "country_exposure": "Можно проверить долю операций со страной из профиля.",
+    "commodity_metals": "Можно сверить цену металла с контрактами компании в этой отрасли.",
+    "commodity_energy": "Можно сверить цену энергоносителя с контрактами компании в этой отрасли.",
+    "commodity_precious": "Можно сверить цену драгметалла с контрактами компании в этой отрасли.",
+    "consumption": "Можно оценить, поддерживает ли новость спрос в торговле компании.",
+    "sector_regulation": "Можно заранее сверить ОКВЭД компании с темой регулирования.",
+    "foreign_trade": "Можно проверить, какие поставки компании попадают под тему новости.",
+    "liquidity_factoring": "Можно сверить лимит факторинга с темой новости.",
+    "counterparty": "Можно проверить платежи с контрагентом, которого касается новость.",
 }
 
 STEP = {
-    "rate_borrower": "Сверить ближайшие платежи по кредиту со ставкой {rate}.",
-    "rate_saver": "Проверить дату окончания депозита и решить, продлевать ли размещение при ставке {rate}.",
+    "rate_borrower": "Сверить ближайшие платежи по кредиту с решением по ставке из новости.",
+    "rate_saver": "Проверить дату окончания депозита и решить, продлевать ли размещение.",
+    "fx_exposure": "Сверить валютные расчёты с курсом из новости.",
+    "country_exposure": "Проверить, касается ли новость страны из профиля.",
+    "commodity_metals": "Сопоставить цену металла из новости с операциями компании.",
+    "commodity_energy": "Сопоставить цену энергоносителя из новости с операциями компании.",
+    "commodity_precious": "Сопоставить цену драгметалла из новости с операциями компании.",
+    "consumption": "Оценить, меняет ли новость спрос в торговле компании.",
+    "sector_regulation": "Проверить, относится ли регулирование из новости к ОКВЭД компании.",
+    "foreign_trade": "Проверить, касается ли новость импорта или экспорта компании.",
+    "liquidity_factoring": "Сверить новость с действующим факторингом компании.",
+    "counterparty": "Проверить, назван ли в новости контрагент компании.",
 }
 
 QUESTION = {
     "rate_borrower": "Какая часть кредитов компании зависит от ключевой ставки?",
     "rate_saver": "На какой срок размещены действующие депозиты?",
+    "fx_exposure": "Какая доля выручки компании номинирована в валюте?",
+    "country_exposure": "Какая доля операций приходится на страну из профиля?",
+    "commodity_metals": "Какая доля операций компании зависит от цены металла?",
+    "commodity_energy": "Какая доля операций компании зависит от цены энергоносителя?",
+    "commodity_precious": "Какая доля операций компании зависит от цены драгметалла?",
+    "consumption": "Как новость может изменить спрос в торговле компании?",
+    "sector_regulation": "Какой режим регулирования относится к ОКВЭД компании?",
+    "foreign_trade": "Какая доля выручки приходится на внешнюю торговлю?",
+    "liquidity_factoring": "Какой объём факторинга нужно сверить с новостью?",
+    "counterparty": "Есть ли в новости контрагент из платежей компании?",
 }
 
 
@@ -56,11 +96,14 @@ def assemble(ctx: AgentContext, copy: dict[str, str] | None = None) -> Card:
         raise RuntimeError("Черновик собирается после сбора профиля и новости")
     primary = ctx.matched[0] if ctx.matched else None
     feature_refs = _feature_refs(ctx, primary)
+    title = _exposure_title(ctx, primary)
     assumptions = _assumptions(ctx)
     if ctx.bank is not None and ctx.bank_note:
         assumptions.append(ctx.bank_note)
-    rate = "14%" if "14" in f"{news.title} {news.excerpt}" else "из новости"
-    sources = _sources(ctx, feature_refs)
+    if primary is None:
+        assumptions.append("Допущение не используется: связь события с профилем компании не найдена.")
+    bank_ok = ctx.bank is not None and ctx.bank.quote in ctx.bank.text
+    sources = _sources(ctx, feature_refs, bank_ok)
     fact = Claim(
         id="fact-1",
         text=ctx.extracted_fact or news.excerpt,
@@ -70,8 +113,9 @@ def assemble(ctx: AgentContext, copy: dict[str, str] | None = None) -> Card:
     )
     claims = [fact]
     bank_view = BankView(status="none")
-    missing = list(profile.missing_data)
-    if ctx.bank is not None:
+    missing = _unknown(profile.missing_data)
+    if bank_ok:
+        assert ctx.bank is not None
         bank_view = BankView(
             status="found",
             quote=ctx.bank.quote,
@@ -98,9 +142,9 @@ def assemble(ctx: AgentContext, copy: dict[str, str] | None = None) -> Card:
         feature_refs=feature_refs,
         confidence=0.7,
     )
-    risk = (copy or {}).get("risk") or RISK.get(primary or "", _fallback_risk())
-    chance = (copy or {}).get("opportunity") or OPPORTUNITY.get(primary or "", _fallback_chance())
-    question = (copy or {}).get("question") or QUESTION.get(primary or "", "Нужно ли учитывать это событие в ближайшем решении?")
+    risk = (copy or {}).get("risk") or _linked_text(primary, title, RISK)
+    chance = (copy or {}).get("opportunity") or _linked_text(primary, title, OPPORTUNITY)
+    question = (copy or {}).get("question") or _question(primary, title)
     return Card(
         card_id=f"{profile.client_id}-{news.id}",
         client_id=profile.client_id,
@@ -116,12 +160,12 @@ def assemble(ctx: AgentContext, copy: dict[str, str] | None = None) -> Card:
         what_happened=WhatHappened(claims=claims, assumptions=assumptions),
         why_for_company=WhyForCompany(claims=[why]),
         consequences=Consequences(
-            risks=[_inference("risk-1", risk, news.id, feature_refs)],
-            opportunities=[_inference("chance-1", chance, news.id, feature_refs)],
+            risks=[_inference("risk-1", risk, news.id, feature_refs)] if risk else [],
+            opportunities=[_inference("chance-1", chance, news.id, feature_refs)] if chance else [],
             depends_on=assumptions,
         ),
         action=Action(
-            next_step=(copy or {}).get("next_step") or _step(primary, rate),
+            next_step=(copy or {}).get("next_step") or _step(primary, title),
             questions=[question],
         ),
         bank_view=bank_view,
@@ -141,23 +185,58 @@ def draft_card(ctx: AgentContext) -> Card:
 
 def _why_text(primary: str | None) -> str:
     if primary is None:
-        return "Кредит и депозит в профиле не найдены, поэтому событие не привязано к деньгам компании."
+        return "В профиле нет продукта или темы, которые связывают эту новость с деньгами компании."
     return WHY.get(primary, "Событие сопоставлено с признаком профиля этой компании.")
 
 
-def _step(primary: str | None, rate: str) -> str:
-    template = STEP.get(primary or "")
-    if template is None:
-        return "Открыть новость и сопоставить её с признаком компании."
-    return template.format(rate=rate)
+def _exposure_title(ctx: AgentContext, primary: str | None) -> str | None:
+    profile = ctx.profile
+    if primary is None or profile is None:
+        return None
+    for exposure in profile.exposures:
+        if exposure.id == primary:
+            return exposure.title
+    return None
 
 
-def _fallback_risk() -> str:
-    return "Прямого влияния на кредит или депозит компании по профилю не видно."
+def _linked_text(primary: str | None, title: str | None, table: dict[str, str]) -> str | None:
+    if primary is None:
+        return None
+    if primary in table:
+        return table[primary]
+    if title is None:
+        return None
+    return f"Вывод относится только к признаку «{title}». Величина влияния в профиле не указана."
 
 
-def _fallback_chance() -> str:
-    return "Можно отложить решение, пока не появится связь события с операциями компании."
+def _step(primary: str | None, title: str | None) -> str:
+    if primary is None:
+        return "Не выбирать действие, пока в профиле не появится признак, связанный с этой новостью."
+    written = STEP.get(primary)
+    if written is not None:
+        return written
+    if title is None:
+        return "Сопоставить новость с найденным признаком компании."
+    return f"Сопоставить новость с признаком «{title}»."
+
+
+def _question(primary: str | None, title: str | None) -> str:
+    if primary is None:
+        return "Какой признак компании связывает её с этим событием?"
+    written = QUESTION.get(primary)
+    if written is not None:
+        return written
+    if title is None:
+        return "Как найденный признак отражается на операциях компании?"
+    return f"Как признак «{title}» отражается на операциях компании?"
+
+
+def _unknown(items: list[str]) -> list[str]:
+    labeled: list[str] = []
+    for item in items:
+        label = FIELD_LABELS.get(item)
+        labeled.append(f"Неизвестно: {label}" if label else item)
+    return labeled
 
 
 def _inference(claim_id: str, text: str, news_id: str, feature_refs: list[str]) -> Claim:
@@ -189,19 +268,27 @@ def _assumptions(ctx: AgentContext) -> list[str]:
     assert profile is not None
     lines: list[str] = []
     for exposure in profile.exposures:
-        if exposure.id in ctx.matched:
-            lines.extend(exposure.assumptions)
+        if exposure.id not in ctx.matched:
+            continue
+        for line in exposure.assumptions:
+            if exposure.basis == "hypothesis":
+                prefix = "Допущение: "
+            elif "неизвест" in line.lower() or "не указан" in line.lower():
+                prefix = "Неизвестно: "
+            else:
+                prefix = "Ограничение данных: "
+            lines.append(f"{prefix}{line}")
     return lines
 
 
-def _sources(ctx: AgentContext, feature_refs: list[str]) -> list[Source]:
+def _sources(ctx: AgentContext, feature_refs: list[str], bank_ok: bool) -> list[Source]:
     profile = ctx.profile
     news = ctx.news
     assert profile is not None and news is not None
     sources = [
         Source(id=news.id, kind="news", title=news.title, url=news.url or None),
     ]
-    if ctx.bank is not None:
+    if bank_ok and ctx.bank is not None:
         sources.append(Source(id=ctx.bank.doc_id, kind="bank_analytics", title=ctx.bank.title, origin="bank_analytics"))
     by_id = {feature.id: feature for feature in profile.features}
     for feature_id in feature_refs:

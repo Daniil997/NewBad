@@ -84,9 +84,15 @@ def test_conflict_reports_different_dates_and_conclusions(tmp_path):
 def test_run_tool_uses_the_bank_payload(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     result = run_tool("search_bank_analytics", {"query": "ключевая ставка"})
-    assert result["status"] in {"found", "conflict"}
-    assert result["hits"][0]["quote"]
-    assert result["hits"][0]["page"] == 1
+    assert result["status"] == "ok"
+    assert result["source"] == "bank_analytics"
+    assert result["evidence_id"] == "key_rate:1"
+    hit = result["items"][0]
+    assert hit["id"] == "key_rate"
+    assert hit["quote"]
+    assert hit["page"] == 1
+    assert hit["evidence_id"] == "key_rate:1"
+    assert hit["source"] == "bank_analytics"
     page = find_bank("inflation", 2)
     assert page is not None
     assert page.page == 2

@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -22,18 +24,44 @@ def test_local_mode_extracts_and_drafts_pasted_news(monkeypatch, tmp_path):
     def fake_post(_url: str, payload: dict, timeout: float) -> dict:
         del timeout
         system = payload["messages"][0]["content"]
+        user = json.loads(payload["messages"][1]["content"])
         seen.append(system)
         if "tools" in system:
             content = '{"tools":["get_profile","search_news","search_bank_analytics","get_counterparties"]}'
         elif "факт" in system:
-            content = '{"fact":"Совет директоров сохранил ключевую ставку на уровне 14%."}'
+            evidence_id = user["evidence"][0]["evidence_id"]
+            content = json.dumps(
+                {
+                    "text": "Совет директоров сохранил ключевую ставку на уровне 14%.",
+                    "layer": "confirmed_fact",
+                    "evidence_ids": [evidence_id],
+                },
+                ensure_ascii=False,
+            )
         else:
-            content = (
-                '{"why":"Компания пользуется кредитом, поэтому ставка держит стоимость заёмных денег.",'
-                '"risk":"Платежи по кредиту не дешевеют.",'
-                '"opportunity":"Можно пересчитать график кредита.",'
-                '"next_step":"Сверить платежи по кредиту со ставкой 14%.",'
-                '"question":"Какая доля кредита зависит от ставки?"}'
+            news_id = user["evidence"][0]["evidence_id"]
+            bank = next((item for item in user["evidence"] if item["layer"] == "bank_position"), None)
+            content = json.dumps(
+                {
+                    "fact": {
+                        "text": "Совет директоров сохранил ключевую ставку на уровне 14%.",
+                        "layer": "confirmed_fact",
+                        "evidence_ids": [news_id],
+                    },
+                    "bank": None
+                    if bank is None
+                    else {"text": bank["text"], "layer": "bank_position", "evidence_ids": [bank["evidence_id"]]},
+                    "inference": {
+                        "layer": "model_inference",
+                        "evidence_ids": [news_id] if bank is None else [news_id, bank["evidence_id"]],
+                        "why": "Компания пользуется кредитом, поэтому ставка держит стоимость заёмных денег.",
+                        "risk": "Платежи по кредиту не дешевеют.",
+                        "opportunity": "Можно пересчитать график кредита.",
+                        "next_step": "Сверить платежи по кредиту со ставкой 14%.",
+                        "question": "Какая доля кредита зависит от ставки?",
+                    },
+                },
+                ensure_ascii=False,
             )
         return {"choices": [{"message": {"content": content}}], "usage": {"total_tokens": 11}}
 

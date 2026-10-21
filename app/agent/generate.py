@@ -10,107 +10,206 @@ from app.llm.client import LLMError, complete, parse_json
 from app.llm.router import current_route
 
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
+_FACT = "confirmed_fact"
+_BANK = "bank_position"
+_INFERENCE = "model_inference"
+_COPY_FIELDS = ("why", "risk", "opportunity", "next_step", "question")
 
 
 def extract_fact(news: NewsItem) -> str | None:
-    route = current_route()
-    if route.provider != "local":
-        return None
-    source = f"{news.title}\n{news.excerpt}"
-    try:
-        result = complete(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "Извлеки один короткий факт из новости. Верни JSON {\"fact\": \"...\"}. "
-                        "Не добавляй числа и даты, которых нет в тексте."
-                    ),
-                },
-                {"role": "user", "content": source},
-            ],
-            model=route.model,
-            mode=route.mode,
-            max_tokens=180,
-        )
-        fact = str(parse_json(result.text).get("fact") or "").strip()
-    except LLMError:
-        return None
-    if not fact or not _grounded(fact, source):
-        return None
-    return fact
+    packet = [_news_evidence(news)]
+    payload = _ask(
+        _messages(
+            (
+                "Извлеки один короткий факт. Верни JSON с полями text, layer и evidence_ids. "
+                "layer только confirmed_fact. evidence_ids — только id из evidence. "
+                "Не добавляй числа, которых нет в text доказательства, и не указывай другие источники."
+            ),
+            {"evidence": packet},
+        ),
+        180,
+    )
+    claim = None if payload is None else _claim(payload, _index(packet), _FACT)
+    return None if claim is None else claim["text"]
 
 
 def request_copy(ctx: AgentContext) -> dict | None:
     route = current_route()
     if route.provider != "local" or ctx.profile is None or ctx.news is None:
         return None
-    payload = {
-        "news": ctx.extracted_fact or ctx.news.excerpt,
-        "bank_quote": None if ctx.bank is None else ctx.bank.quote,
-        "features": _prompt_features(ctx),
-        "matched": ctx.matched,
-        "issues": ctx.issues,
-    }
-    try:
-        result = complete(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "Собери вывод для карточки. Верни JSON с полями why, risk, opportunity, next_step, question. "
-                        "Пиши по-русски, коротко. Не выдумывай числа: бери их только из news и bank_quote. "
-                        "Цитату банка не переписывай."
-                    ),
-                },
-                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-            ],
-            model=route.model,
-            mode=route.mode,
-            max_tokens=400,
+    packet = evidence_packet(ctx)
+    allowed = _index(packet)
+    payload = _ask(
+        _messages(
+            (
+                "Собери карточку по списку evidence. Верни JSON с ключами fact, bank и inference. "
+                "fact: layer confirmed_fact и evidence_ids только из доказательств этого слоя. "
+                "bank: null, если банковского доказательства нет; иначе layer bank_position, "
+                "text — подстрока цитаты, evidence_ids только банковские. "
+                "inference: layer model_inference и поля why, risk, opportunity, next_step, question. "
+                "evidence_ids inference бери только из переданного списка. "
+                "Не выдумывай id, адреса и числа, которых нет в evidence."
+            ),
+            {"evidence": packet, "issues": ctx.issues},
+        ),
+        400,
+    )
+    if payload is None or any(key not in payload for key in ("fact", "bank", "inference")):
+        return None
+    fact = _claim(payload.get("fact"), allowed, _FACT)
+    if fact is None:
+        return None
+    has_bank = any(item["layer"] == _BANK for item in packet)
+    if payload.get("bank") is None:
+        bank = None
+    elif not has_bank:
+        return None
+    else:
+        bank = _claim(payload.get("bank"), allowed, _BANK)
+        if bank is None:
+            return None
+    inference = payload.get("inference")
+    if not isinstance(inference, dict) or inference.get("layer") != _INFERENCE:
+        return None
+    ids = _known_ids(inference.get("evidence_ids"), allowed)
+    if not ids:
+        return None
+    corpus = _cited_text(ids, allowed)
+    fields: dict[str, str] = {}
+    for key in _COPY_FIELDS:
+        text = str(inference.get(key) or "").strip()
+        if not text or not _grounded(text, corpus):
+            return None
+        fields[key] = text
+    return {**fields, "fact": fact, "bank": bank, "inference": {"layer": _INFERENCE, "evidence_ids": ids, **fields}}
+
+
+def answer_with_model(question: str, card_text: str, evidence: list[dict] | None = None) -> str | None:
+    packet = evidence if evidence is not None else [
+        {"evidence_id": "card", "source": "card", "layer": _FACT, "title": "Карточка", "text": card_text}
+    ]
+    payload = _ask(
+        _messages(
+            (
+                "Ответь на вопрос только по evidence. Верни JSON {\"answer\": \"...\", \"evidence_ids\": [...]}. "
+                "evidence_ids бери только из переданного списка. Если в ответе есть число, укажи id доказательства, "
+                "в котором оно есть. Не создавай новые источники."
+            ),
+            {"question": question, "evidence": packet},
+        ),
+        250,
+    )
+    if payload is None:
+        return None
+    answer = str(payload.get("answer") or "").strip()
+    allowed = _index(packet)
+    ids = _known_ids(payload.get("evidence_ids"), allowed)
+    if not answer or ids is None:
+        return None
+    corpus = _cited_text(ids, allowed) if ids else ""
+    if _numbers(answer) and not ids:
+        return None
+    if not _grounded(answer, corpus or card_text):
+        return None
+    return answer
+
+
+def evidence_packet(ctx: AgentContext) -> list[dict]:
+    items: list[dict] = []
+    if ctx.news is not None:
+        items.append(_news_evidence(ctx.news, ctx.extracted_fact))
+    if ctx.bank is not None:
+        items.append(
+            {
+                "evidence_id": f"{ctx.bank.doc_id}:{ctx.bank.page}",
+                "source": ctx.bank.source_type,
+                "layer": _BANK,
+                "title": ctx.bank.title,
+                "page": ctx.bank.page,
+                "text": ctx.bank.quote,
+            }
         )
-        copy = parse_json(result.text)
-    except LLMError:
-        return None
-    if not all(str(copy.get(key) or "").strip() for key in ("why", "risk", "opportunity", "next_step", "question")):
-        return None
-    return {key: str(copy[key]).strip() for key in ("why", "risk", "opportunity", "next_step", "question")}
+    for feature in _prompt_features(ctx):
+        items.append(
+            {
+                "evidence_id": feature["id"],
+                "source": "company_profile",
+                "layer": _FACT,
+                "title": feature["label"],
+                "text": feature["value"],
+            }
+        )
+    return items
 
 
-def answer_with_model(question: str, card_text: str) -> str | None:
+def _news_evidence(news: NewsItem, text: str | None = None) -> dict:
+    return {
+        "evidence_id": news.id,
+        "source": news.url or news.source or "news",
+        "layer": _FACT,
+        "title": news.title,
+        "text": text or f"{news.title}. {news.excerpt}",
+    }
+
+
+def _ask(messages: list[dict[str, str]], max_tokens: int) -> dict | None:
     route = current_route()
     if route.provider != "local":
         return None
     try:
-        result = complete(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "Ответь на вопрос только по тексту карточки. Не добавляй чисел, которых в карточке нет. "
-                        "Если ответа нет, так и скажи."
-                    ),
-                },
-                {"role": "user", "content": json.dumps({"question": question, "card": card_text}, ensure_ascii=False)},
-            ],
-            model=route.model,
-            mode=route.mode,
-            max_tokens=250,
-        )
+        result = complete(messages, model=route.model, mode=route.mode, max_tokens=max_tokens)
+        return parse_json(result.text)
     except LLMError:
         return None
-    text = result.text.strip()
-    if not text or not _grounded(text, card_text):
+
+
+def _messages(instruction: str, payload: dict) -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": instruction},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+
+def _claim(payload: object, allowed: dict[str, dict], layer: str) -> dict | None:
+    if not isinstance(payload, dict) or payload.get("layer") != layer:
         return None
-    return text
+    if "source" in payload and str(payload.get("source") or "") not in {item["source"] for item in allowed.values()}:
+        return None
+    text = str(payload.get("text") or "").strip()
+    ids = _known_ids(payload.get("evidence_ids"), allowed)
+    if not text or not ids:
+        return None
+    if any(allowed[item]["layer"] != layer for item in ids):
+        return None
+    corpus = _cited_text(ids, allowed)
+    if not _grounded(text, corpus):
+        return None
+    if layer == _BANK and not any(text in allowed[item]["text"] for item in ids):
+        return None
+    return {"text": text, "layer": layer, "evidence_ids": ids}
+
+
+def _known_ids(value: object, allowed: dict[str, dict]) -> list[str] | None:
+    if not isinstance(value, list) or any(not isinstance(item, str) or item not in allowed for item in value):
+        return None
+    return value
+
+
+def _cited_text(ids: list[str], allowed: dict[str, dict]) -> str:
+    return " ".join(allowed[item]["text"] for item in ids)
+
+
+def _index(items: list[dict]) -> dict[str, dict]:
+    return {str(item["evidence_id"]): item for item in items}
 
 
 def _prompt_features(ctx: AgentContext) -> list[dict[str, str]]:
     allowed = set(yaml.safe_load((ROOT / "config" / "prompt_fields.yaml").read_text(encoding="utf-8"))["allowed"])
     profile = ctx.profile
-    assert profile is not None
+    if profile is None:
+        return []
     return [
-        {"label": feature.label, "value": feature.value}
+        {"id": feature.id, "label": feature.label, "value": feature.value}
         for feature in profile.features
         if feature.id in allowed
     ]
