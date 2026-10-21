@@ -5,6 +5,7 @@ from urllib.parse import urlsplit
 import httpx
 import pytest
 
+from app.corpus.search import search_news
 from app.ingest.news import NewsIngestError, NewsSource, import_news, load_news_source
 
 _SOURCE = NewsSource(
@@ -105,6 +106,12 @@ def test_missing_date_url_and_text_are_not_invented(tmp_path):
         _item(published=""),
         _item(url="не адрес", guid="docid_4", title="Сообщение без адреса источника"),
         _item(text="   ", guid="docid_5", url="https://www.cbr.ru/press/event/?id=5"),
+        _item(
+            published="вчера",
+            guid="docid_7",
+            url="https://www.cbr.ru/press/event/?id=7",
+            title="Сообщение с неразборчивой датой публикации",
+        ),
         "<item><link>https://www.cbr.ru/press/event/?id=6</link><guid>docid_6</guid>"
         "<pubDate>Fri, 11 Sep 2026 13:30:00 +0300</pubDate><description>Текст</description></item>",
     )
@@ -162,3 +169,33 @@ def test_source_failure_timeout_and_rate_are_errors(tmp_path):
     with pytest.raises(NewsIngestError) as rate:
         import_news(tmp_path / "twice", source=limited, fetch=lambda: _feed(_item()), min_interval_s=60)
     assert rate.value.kind == "rate"
+
+
+def test_imported_news_is_searchable_by_its_source_url(tmp_path):
+    folder = tmp_path / "news"
+    imported = import_news(
+        folder,
+        source=_SOURCE,
+        fetch=lambda: _feed(_item()),
+        loaded_on=date(2026, 10, 21),
+        min_interval_s=0,
+    )
+    hits = search_news("ключевую ставку", folder=folder, today=date(2026, 10, 21))
+    assert len(hits) == 1
+    hit = hits[0]
+    assert hit.id == imported.items[0].id
+    assert hit.url == "https://www.cbr.ru/press/event/?id=1"
+    assert hit.published_at == "2026-09-11"
+    assert hit.event_type == "monetary_policy"
+    assert "заёмных денег" in hit.excerpt
+
+    duplicate = import_news(
+        folder,
+        source=_SOURCE,
+        fetch=lambda: _feed(_item()),
+        loaded_on=date(2026, 10, 21),
+        min_interval_s=0,
+    )
+    assert duplicate.status == "duplicate"
+    again = search_news("ключевую ставку", folder=folder, today=date(2026, 10, 21))
+    assert [item.id for item in again] == [hit.id]

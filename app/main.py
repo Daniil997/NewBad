@@ -51,6 +51,8 @@ class PasteNews(BaseModel):
     title: str
     text: str
     url: str = ""
+    published_at: str = ""
+    source: str = ""
 
 
 class ChatQuestion(BaseModel):
@@ -98,7 +100,7 @@ def paste_news(client_id: str, body: PasteNews) -> Card:
     if get_profile(client_id) is None:
         raise HTTPException(status_code=404, detail="Компания не найдена")
     try:
-        item = remember_pasted(body.title, body.text, body.url)
+        item = remember_pasted(body.title, body.text, body.url, body.published_at, body.source)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     card = build_card(client_id, item.id)

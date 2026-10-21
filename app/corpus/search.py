@@ -1,6 +1,8 @@
 import json
 import re
+from datetime import date
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import BaseModel, ValidationError, model_validator
@@ -26,6 +28,8 @@ _COMMON_WORDS = (
 )
 _INDEXABLE = frozenset({"embedded", "ocr"})
 _MIN_CHARS = 40
+_NEWS_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_STALE_DAYS = 180
 
 
 class NewsItem(BaseModel):
@@ -36,6 +40,10 @@ class NewsItem(BaseModel):
     excerpt: str
     event_type: str | None
     event_title: str | None
+    source: str | None = None
+    loaded_at: str | None = None
+    status: str = "demo"
+    stale: bool = False
 
 
 class BankDocument(BaseModel):
@@ -65,9 +73,11 @@ class SearchHit(BaseModel):
     excerpt: str
     event_type: str | None = None
     published_at: str | None = None
+    url: str | None = None
     page: int | None = None
     source_type: str | None = None
     strength: str | None = None
+    stale: bool = False
 
 
 class CorpusError(Exception):
@@ -78,24 +88,31 @@ class CorpusError(Exception):
         super().__init__(message)
 
 
-def load_news() -> list[NewsItem]:
+def load_news(folder: Path | None = None, today: date | None = None) -> list[NewsItem]:
+    """Демо-файлы и `imported/*.json` читаются в один формат. Дубли и неполные записи в корпус не входят."""
+    root = folder or (ROOT / "data" / "news")
+    if not root.is_dir():
+        return []
+    paths = sorted(path for path in root.glob("*.json") if path.name != "import.json")
+    imported = root / "imported"
+    if imported.is_dir():
+        paths.extend(path for path in sorted(imported.glob("*.json")) if path.name != "import.json")
     taxonomy = _taxonomy()
+    current = today or date.today()
     items: list[NewsItem] = []
-    for path in sorted((ROOT / "data" / "news").glob("*.json")):
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        event_type = classify(f"{raw['title']} {raw['excerpt']}", taxonomy)
-        spec = taxonomy["event_types"].get(event_type or "", {})
-        items.append(
-            NewsItem(
-                id=raw["id"],
-                url=raw["url"],
-                title=raw["title"],
-                published_at=raw["published_at"],
-                excerpt=raw["excerpt"],
-                event_type=event_type,
-                event_title=spec.get("title"),
-            )
-        )
+    seen_ids: set[str] = set()
+    seen_urls: set[str] = set()
+    for path in paths:
+        record = _news_record(_read_news(path), current, taxonomy)
+        if record is None:
+            continue
+        url_key = _article_key(record.url)
+        if record.id in seen_ids or (url_key is not None and url_key in seen_urls):
+            continue
+        seen_ids.add(record.id)
+        if url_key is not None:
+            seen_urls.add(url_key)
+        items.append(record)
     return items
 
 
@@ -128,11 +145,17 @@ def classify(text: str, taxonomy: dict | None = None) -> str | None:
     return best_id
 
 
-def search_news(query: str, limit: int = 5) -> list[SearchHit]:
-    news = load_news()
+def search_news(
+    query: str,
+    limit: int = 5,
+    folder: Path | None = None,
+    today: date | None = None,
+) -> list[SearchHit]:
+    """Ищет по заголовку и тексту. Устаревшая новость остаётся в выдаче, но после свежих."""
+    news = load_news(folder, today)
     ranked = _rank(query, [f"{item.title} {item.excerpt}" for item in news])
     hits: list[SearchHit] = []
-    for index, score in ranked[:limit]:
+    for index, score in ranked:
         item = news[index]
         hits.append(
             SearchHit(
@@ -141,9 +164,13 @@ def search_news(query: str, limit: int = 5) -> list[SearchHit]:
                 score=round(score, 4),
                 excerpt=item.excerpt,
                 event_type=item.event_type,
+                published_at=item.published_at,
+                url=item.url,
+                stale=item.stale,
             )
         )
-    return hits
+    hits.sort(key=lambda hit: (not hit.stale, hit.score), reverse=True)
+    return hits[:limit]
 
 
 def search_bank_analytics(query: str, limit: int = 5, folder: Path | None = None) -> list[SearchHit]:
@@ -201,6 +228,68 @@ def _rank(query: str, documents: list[str]) -> list[tuple[int, float]]:
 
 def _taxonomy() -> dict:
     return yaml.safe_load((ROOT / "config" / "taxonomy.yaml").read_text(encoding="utf-8"))
+
+
+def _read_news(path: Path) -> dict:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise CorpusError("load", f"Не читается новость {path.name}: {error.__class__.__name__}") from error
+    if not isinstance(raw, dict):
+        raise CorpusError("load", f"Новость {path.name} должна быть объектом")
+    return raw
+
+
+def _news_record(raw: dict, today: date, taxonomy: dict) -> NewsItem | None:
+    if str(raw.get("status") or "") == "duplicate":
+        return None
+    title = str(raw.get("title") or "").strip()
+    url = str(raw.get("url") or "").strip()
+    published = str(raw.get("published_at") or "").strip()
+    body = str(raw.get("excerpt") or raw.get("text") or "").strip()
+    identifier = str(raw.get("id") or "").strip()
+    if not identifier or not title or not body or not _news_url(url) or not _news_date(published):
+        return None
+    event_type = classify(f"{title} {body}", taxonomy)
+    spec = taxonomy["event_types"].get(event_type or "", {})
+    published_on = date.fromisoformat(published)
+    return NewsItem(
+        id=identifier,
+        url=url,
+        title=title,
+        published_at=published,
+        excerpt=body,
+        event_type=event_type,
+        event_title=spec.get("title"),
+        source=str(raw["source"]).strip() if raw.get("source") else None,
+        loaded_at=str(raw["loaded_at"]).strip() if raw.get("loaded_at") else None,
+        status=str(raw.get("status") or "demo"),
+        stale=(today - published_on).days > _STALE_DAYS,
+    )
+
+
+def _news_url(value: str) -> bool:
+    parsed = urlsplit(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _article_key(url: str) -> str | None:
+    """Адрес главной страницы не считается идентификатором статьи: у демо-новостей он общий."""
+    parsed = urlsplit(url)
+    path = parsed.path.rstrip("/")
+    if not parsed.query and not path:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}{path}?{parsed.query}".lower()
+
+
+def _news_date(value: str) -> bool:
+    if _NEWS_DATE.fullmatch(value) is None:
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _passport(path: Path) -> BankDocument:

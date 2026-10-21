@@ -25,6 +25,7 @@ _TAG = re.compile(r"(?is)<(script|style).*?>.*?</\1>|<[^>]+>")
 _SPACE = re.compile(r"\s+")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _EXCERPT = 600
+_MIN_TEXT = 40
 _SIMILAR = 0.8
 _fetched_at: dict[str, float] = {}
 
@@ -128,6 +129,52 @@ def import_news(
         len(rejected),
     )
     return batch
+
+
+class CleanArticle(BaseModel):
+    title: str
+    text: str
+    url: str
+    published_at: str
+    source: str | None
+
+
+def clean_article(
+    title: str,
+    text: str,
+    url: str = "",
+    published_at: str = "",
+    source: str = "",
+) -> CleanArticle:
+    """Та же очистка, что у RSS. Пустые адрес, дата и источник остаются пустыми."""
+    cleaned_title = _plain(title)
+    cleaned_text = _excerpt(_plain(text))
+    if not cleaned_title:
+        raise ValueError("Нужен заголовок новости")
+    if not cleaned_text:
+        raise ValueError("Текст новости пустой")
+    if len(cleaned_text) < _MIN_TEXT:
+        raise ValueError("Текст новости слишком короткий")
+    cleaned_url = ""
+    if url.strip():
+        parsed = _url(url)
+        if parsed is None:
+            raise ValueError("Некорректный URL")
+        cleaned_url = parsed
+    cleaned_date = ""
+    if published_at.strip():
+        parsed_date = _published(published_at)
+        if parsed_date is None:
+            raise ValueError("Некорректная дата публикации")
+        cleaned_date = parsed_date
+    cleaned_source = _plain(source)
+    return CleanArticle(
+        title=cleaned_title,
+        text=cleaned_text,
+        url=cleaned_url,
+        published_at=cleaned_date,
+        source=cleaned_source or None,
+    )
 
 
 def load_news_source(path: Path | None = None) -> NewsSource:

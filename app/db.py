@@ -69,10 +69,14 @@ def init_db() -> None:
                 event_type TEXT,
                 event_title TEXT,
                 published_at TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                source TEXT
             );
             """
         )
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(pasted_news)")}
+        if "source" not in columns:
+            connection.execute("ALTER TABLE pasted_news ADD COLUMN source TEXT")
 
 
 def journal_tables() -> list[str]:
