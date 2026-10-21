@@ -19,7 +19,10 @@ def db_path() -> Path:
 
 
 def connect() -> sqlite3.Connection:
-    connection = sqlite3.connect(db_path())
+    try:
+        connection = sqlite3.connect(db_path())
+    except sqlite3.Error as error:
+        raise JournalError(f"Журнал недоступен: {error}") from error
     connection.row_factory = sqlite3.Row
     return connection
 
@@ -33,7 +36,11 @@ def init_db() -> None:
                 tool TEXT NOT NULL,
                 arguments TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                result_hash TEXT
+                result_hash TEXT,
+                result TEXT,
+                client_id TEXT,
+                event_id TEXT,
+                query TEXT
             );
             CREATE TABLE IF NOT EXISTS llm_calls (
                 id INTEGER PRIMARY KEY,
@@ -44,7 +51,9 @@ def init_db() -> None:
                 latency_ms INTEGER,
                 prompt_hash TEXT,
                 switch_reason TEXT,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                client_id TEXT,
+                event_id TEXT
             );
             CREATE TABLE IF NOT EXISTS feed_cache (
                 client_id TEXT NOT NULL,
@@ -77,6 +86,24 @@ def init_db() -> None:
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(pasted_news)")}
         if "source" not in columns:
             connection.execute("ALTER TABLE pasted_news ADD COLUMN source TEXT")
+        _add_column(connection, "tool_calls", "result", "TEXT")
+        _add_column(connection, "tool_calls", "client_id", "TEXT")
+        _add_column(connection, "tool_calls", "event_id", "TEXT")
+        _add_column(connection, "tool_calls", "query", "TEXT")
+        _add_column(connection, "llm_calls", "client_id", "TEXT")
+        _add_column(connection, "llm_calls", "event_id", "TEXT")
+
+
+def _add_column(connection: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    if table not in {"tool_calls", "llm_calls"}:
+        raise JournalError(f"Неизвестная таблица журнала: {table}")
+    names = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+    if column not in names:
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+class JournalError(Exception):
+    """Журнал не открылся или не записал строку. Повторный запуск сам по себе ошибкой не является."""
 
 
 def journal_tables() -> list[str]:

@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from app.agent.generate import answer_with_model
 from app.llm.router import current_route
 from app.schemas.card import Card
-from app.tracing.journal import log_llm_call
+from app.tracing.journal import log_llm_call, trace_scope
 
 
 class ChatReply(BaseModel):
@@ -17,11 +17,12 @@ def answer_from_card(card: Card, question: str) -> ChatReply:
     if not cleaned:
         raise ValueError("Пустой вопрос")
     source_ids = [item.id for item in card.sources if item.kind in {"news", "bank_analytics"}]
-    model_answer = answer_with_model(cleaned, _card_text(card))
-    if model_answer:
-        return ChatReply(answer=model_answer, mode=current_route().mode, source_ids=source_ids)
-    log_llm_call("mock-model", "mock", "mock", tokens=0)
-    return ChatReply(answer=_pick(card, cleaned.lower()), mode="mock", source_ids=source_ids)
+    with trace_scope(card.client_id, card.event_id):
+        model_answer = answer_with_model(cleaned, _card_text(card))
+        if model_answer:
+            return ChatReply(answer=model_answer, mode=current_route().mode, source_ids=source_ids)
+        log_llm_call("mock-model", "mock", "mock", tokens=0, latency_ms=0, switch_reason="чат отвечает по карточке")
+        return ChatReply(answer=_pick(card, cleaned.lower()), mode="mock", source_ids=source_ids)
 
 
 def _card_text(card: Card) -> str:

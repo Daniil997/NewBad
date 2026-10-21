@@ -20,6 +20,7 @@ def verify_card(card, ctx: AgentContext) -> list[str]:
         issues.append("conflict")
     issues.extend(_unsupported(card, ctx))
     _lower_confidence(card, ctx)
+    card.sync_confidence()
     known = _numbers(_corpus(ctx))
     for number in _numbers(_card_text(card)):
         if number not in known:
@@ -86,7 +87,12 @@ def _layers(card, ctx: AgentContext) -> list[str]:
             issues.append(f"layer:{claim.id}")
         elif claim.layer == "confirmed_fact" and not _fact_in_sources(claim, card, ctx):
             issues.append(f"evidence:{claim.id}")
-        elif claim.layer == "bank_position" and not _in_bank(claim.text, card, ctx):
+        elif claim.layer == "bank_position":
+            issues.append(f"layer:{claim.id}")
+    for claim in card.bank_position:
+        if claim.layer != "bank_position":
+            issues.append(f"layer:{claim.id}")
+        elif not _in_bank(claim.text, card, ctx):
             if _page_document(ctx, card.bank_view.doc_ref, card.bank_view.page) is None:
                 issues.append("page")
             else:

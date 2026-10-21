@@ -66,7 +66,7 @@ def test_opposite_sources_are_a_conflict(monkeypatch, tmp_path):
     quote = "Снижение цен на металлы замедлило выручку компаний."
     ctx.bank = ctx.bank.model_copy(update={"text": f"{quote}. Материал банка.", "quote": quote, "theses": []})
     card.bank_view.quote = quote
-    card.what_happened.claims[1] = card.what_happened.claims[1].model_copy(update={"text": quote})
+    card.bank_position[0] = card.bank_position[0].model_copy(update={"text": quote})
     assert "conflict" in verify_card(card, ctx)
 
 

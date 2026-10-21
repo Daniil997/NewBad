@@ -14,7 +14,7 @@ from app.schemas.card import Card
 from app.scoring.feed import Feed, build_feed
 from app.llm.placement import decide, placement_label
 from app.llm.router import current_route, local_status
-from app.tracing.journal import latest_steps
+from app.tracing.journal import latest_steps, read_trace
 
 
 @asynccontextmanager
@@ -78,10 +78,10 @@ def event_card(client_id: str, event_id: str) -> Card:
 
 
 @app.get("/api/clients/{client_id}/events/{event_id}/steps")
-def event_steps(client_id: str, event_id: str) -> dict[str, list[str]]:
+def event_steps(client_id: str, event_id: str) -> dict:
     if get_profile(client_id) is None:
         raise HTTPException(status_code=404, detail="Компания не найдена")
-    return {"steps": latest_steps(client_id, event_id)}
+    return {"steps": latest_steps(client_id, event_id), "trace": read_trace(client_id, event_id)}
 
 
 @app.post("/api/clients/{client_id}/events/{event_id}/chat")

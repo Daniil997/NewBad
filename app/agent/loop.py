@@ -17,7 +17,7 @@ from app.corpus.search import CorpusError
 from app.llm.router import choose_tools, time_budget_s
 from app.profile.build import get_profile
 from app.schemas.card import Card
-from app.tracing.journal import log_step
+from app.tracing.journal import log_step, trace_scope
 
 
 def build_card(client_id: str, event_id: str) -> Card | None:
@@ -27,39 +27,40 @@ def build_card(client_id: str, event_id: str) -> Card | None:
         return None
     ctx = AgentContext(client_id=client_id, event_id=event_id)
     started = time.perf_counter()
-    _plan(ctx)
-    _gather(ctx)
-    card = draft_card(ctx)
-    log_step(client_id, event_id, "DRAFT", {"card_id": card.card_id})
-    issues = verify_card(card, ctx)
-    ctx.record_issues(issues)
-    log_step(client_id, event_id, "VERIFY", {"issues": issues})
-    while issues and not _expired(started) and ctx.mark_attempt():
-        ctx.record_issues(issues)
-        _search_again(ctx, issues)
+    with trace_scope(client_id, event_id):
+        _plan(ctx)
+        _gather(ctx)
         card = draft_card(ctx)
-        card.llm_trace.retries = ctx.retries
+        log_step(client_id, event_id, "DRAFT", {"card_id": card.card_id})
         issues = verify_card(card, ctx)
         ctx.record_issues(issues)
-        log_step(client_id, event_id, "VERIFY", {"issues": issues, "retry": ctx.retries})
-    finish = "проверка пройдена"
-    if issues:
-        finish = "истекло время цикла" if _expired(started) else "достигнут лимит повторов"
-        card = assemble(ctx)
-        card.llm_trace.retries = ctx.retries
-        card.missing_data = [
-            *card.missing_data,
-            "После двух проверок черновик с неподтверждёнными числами или цитатой отклонён.",
-        ]
-        issues = verify_card(card, ctx)
-        finish += ": неподтверждённые утверждения заменены шаблоном"
-    if issues:
-        raise RuntimeError(f"Карточка не прошла проверку: {issues}")
-    elapsed_ms = int((time.perf_counter() - started) * 1000)
-    ctx.finish_reason = finish
-    card.llm_trace.latency_ms = elapsed_ms
-    log_step(client_id, event_id, "FINALIZE", {"retries": ctx.retries, "elapsed_ms": elapsed_ms, "reason": finish})
-    return card
+        log_step(client_id, event_id, "VERIFY", {"issues": issues})
+        while issues and not _expired(started) and ctx.mark_attempt():
+            ctx.record_issues(issues)
+            _search_again(ctx, issues)
+            card = draft_card(ctx)
+            card.llm_trace.retries = ctx.retries
+            issues = verify_card(card, ctx)
+            ctx.record_issues(issues)
+            log_step(client_id, event_id, "VERIFY", {"issues": issues, "retry": ctx.retries})
+        finish = "проверка пройдена"
+        if issues:
+            finish = "истекло время цикла" if _expired(started) else "достигнут лимит повторов"
+            card = assemble(ctx)
+            card.llm_trace.retries = ctx.retries
+            card.missing_data = [
+                *card.missing_data,
+                "После двух проверок черновик с неподтверждёнными числами или цитатой отклонён.",
+            ]
+            issues = verify_card(card, ctx)
+            finish += ": неподтверждённые утверждения заменены шаблоном"
+        if issues:
+            raise RuntimeError(f"Карточка не прошла проверку: {issues}")
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        ctx.finish_reason = finish
+        card.llm_trace.latency_ms = elapsed_ms
+        log_step(client_id, event_id, "FINALIZE", {"retries": ctx.retries, "elapsed_ms": elapsed_ms, "reason": finish})
+        return card
 
 
 def _plan(ctx: AgentContext) -> None:

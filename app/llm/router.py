@@ -43,7 +43,10 @@ def choose_tools(planned: list[str]) -> PlanChoice:
     tools = [name for name in planned if name in ALLOWED_TOOLS]
     route = current_route()
     if route.provider != "local":
-        reason = None if os.environ.get("LLM_MODE", "mock") == "mock" else "облако выключено, ответ собирает заглушка"
+        if os.environ.get("LLM_MODE", "mock") == "mock":
+            reason = "режим mock, модель не вызывается"
+        else:
+            reason = "облако выключено, ответ собирает заглушка"
         log_llm_call(route.model, route.provider, route.mode, switch_reason=reason)
         return PlanChoice(tools=tools, model=route.model, provider=route.provider, mode=route.mode)
     try:

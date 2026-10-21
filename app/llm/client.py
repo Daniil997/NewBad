@@ -58,7 +58,7 @@ def complete(messages: list[dict[str, str]], *, model: str, mode: str, max_token
     except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
         raise LLMError("сервер модели недоступен") from exc
     latency_ms = int((time.perf_counter() - started) * 1000)
-    log_llm_call(model, "local", mode, tokens=tokens, latency_ms=latency_ms)
+    log_llm_call(model, "local", mode, tokens=tokens, latency_ms=latency_ms, switch_reason="локальный вызов")
     return Completion(text=str(text), tokens=tokens, model=model, provider="local", mode=mode)
 
 

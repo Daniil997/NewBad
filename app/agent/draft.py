@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from app.agent.loop_context import AgentContext
-from app.profile.build import FIELD_LABELS, Feature
+from app.profile.build import FIELD_LABELS
 from app.schemas.card import (
     Action,
     BankView,
@@ -9,7 +9,9 @@ from app.schemas.card import (
     Claim,
     Consequences,
     LlmTrace,
+    ProfileFact,
     Source,
+    Verification,
     WhatHappened,
     WhyForCompany,
 )
@@ -112,6 +114,7 @@ def assemble(ctx: AgentContext, copy: dict[str, str] | None = None) -> Card:
         confidence=0.95,
     )
     claims = [fact]
+    bank_claims: list[Claim] = []
     bank_view = BankView(status="none")
     missing = _unknown(profile.missing_data)
     if bank_ok:
@@ -123,7 +126,7 @@ def assemble(ctx: AgentContext, copy: dict[str, str] | None = None) -> Card:
             doc_ref=ctx.bank.doc_id,
             page=ctx.bank.page,
         )
-        claims.append(
+        bank_claims.append(
             Claim(
                 id="bank-1",
                 text=ctx.bank.quote,
@@ -145,6 +148,7 @@ def assemble(ctx: AgentContext, copy: dict[str, str] | None = None) -> Card:
     risk = (copy or {}).get("risk") or _linked_text(primary, title, RISK)
     chance = (copy or {}).get("opportunity") or _linked_text(primary, title, OPPORTUNITY)
     question = (copy or {}).get("question") or _question(primary, title)
+    profile_facts = _profile_facts(profile, feature_refs)
     return Card(
         card_id=f"{profile.client_id}-{news.id}",
         client_id=profile.client_id,
@@ -158,6 +162,7 @@ def assemble(ctx: AgentContext, copy: dict[str, str] | None = None) -> Card:
             retries=ctx.retries,
         ),
         what_happened=WhatHappened(claims=claims, assumptions=assumptions),
+        bank_position=bank_claims,
         why_for_company=WhyForCompany(claims=[why]),
         consequences=Consequences(
             risks=[_inference("risk-1", risk, news.id, feature_refs)] if risk else [],
@@ -170,9 +175,12 @@ def assemble(ctx: AgentContext, copy: dict[str, str] | None = None) -> Card:
         ),
         bank_view=bank_view,
         sources=sources,
+        profile_facts=profile_facts,
         features_triggered=list(ctx.matched),
         missing_data=missing,
         assumptions=assumptions,
+        verification=Verification(status="passed"),
+        follow_up=[question],
     )
 
 
@@ -286,18 +294,51 @@ def _sources(ctx: AgentContext, feature_refs: list[str], bank_ok: bool) -> list[
     news = ctx.news
     assert profile is not None and news is not None
     sources = [
-        Source(id=news.id, kind="news", title=news.title, url=news.url or None),
+        Source(
+            id=news.id,
+            kind="news",
+            title=news.title,
+            url=news.url or None,
+            published_at=news.published_at or None,
+            quote=news.excerpt,
+        ),
     ]
     if bank_ok and ctx.bank is not None:
-        sources.append(Source(id=ctx.bank.doc_id, kind="bank_analytics", title=ctx.bank.title, origin="bank_analytics"))
+        sources.append(
+            Source(
+                id=ctx.bank.doc_id,
+                kind="bank_analytics",
+                title=ctx.bank.title,
+                origin="bank_analytics",
+                document=ctx.bank.doc_id,
+                published_at=ctx.bank.published_at,
+                page=ctx.bank.page,
+                quote=ctx.bank.quote,
+            )
+        )
     by_id = {feature.id: feature for feature in profile.features}
     for feature_id in feature_refs:
         feature = by_id.get(feature_id)
-        sources.append(_feature_source(feature_id, feature))
+        sources.append(
+            Source(
+                id=feature.id,
+                kind="company_feature",
+                title=feature.label,
+                origin=feature.origin,
+                quote=feature.value,
+            )
+        )
     return sources
 
 
-def _feature_source(feature_id: str, feature: Feature | None) -> Source:
-    if feature is None:
-        return Source(id=feature_id, kind="company_feature", title=feature_id, origin="derived")
-    return Source(id=feature.id, kind="company_feature", title=feature.label, origin=feature.origin)
+def _profile_facts(profile, feature_refs: list[str]) -> list[ProfileFact]:
+    by_id = {item.id: item for item in profile.features}
+    facts: list[ProfileFact] = []
+    seen: set[str] = set()
+    for feature_id in feature_refs:
+        if feature_id in seen:
+            continue
+        seen.add(feature_id)
+        feature = by_id[feature_id]
+        facts.append(ProfileFact(feature_id=feature.id, label=feature.label, value=feature.value))
+    return facts

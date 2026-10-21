@@ -14,6 +14,7 @@ def _why(card: dict) -> str:
 def _layers(card: dict) -> set[str]:
     claims = (
         card["what_happened"]["claims"]
+        + card["bank_position"]
         + card["why_for_company"]["claims"]
         + card["consequences"]["risks"]
         + card["consequences"]["opportunities"]
