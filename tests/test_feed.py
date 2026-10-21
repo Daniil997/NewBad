@@ -39,6 +39,7 @@ def test_feed_api_uses_cache():
     assert missing.status_code == 404
     with connect() as connection:
         count = connection.execute(
-            "SELECT COUNT(*) AS n FROM feed_cache WHERE client_id = 'U-SAVER'"
+            "SELECT COUNT(*) AS n FROM feed_cache WHERE client_id = 'U-SAVER' AND corpus_version = ?",
+            (first.json()["corpus_version"],),
         ).fetchone()["n"]
     assert count == 1
