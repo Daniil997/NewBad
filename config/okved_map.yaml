@@ -1,10 +1,21 @@
-# Префиксы ОКВЭД-2 в тему. Применяется самый длинный подходящий префикс. Дополнять по датасету.
+# Префикс сравнивается с цифрами кода ОКВЭД-2. Побеждает самый длинный.
+# 46.71 покрывает 46.71.2. Класс целиком не ставится, если внутри него разные отрасли.
+# Неизвестный код не получает тему. Код из ambiguous тоже не получает её,
+# даже если более короткий префикс подошёл бы: отрасль по такому коду не угадывается.
+# themes — какие типы событий отрасль делает уместными. Это не экспозиция профиля.
+ambiguous:
+  - '24.46' # ядерное топливо, не металлургия класса 24
+  - '46.1' # агенты опта: товар неизвестен
+  - '46.76' # прочие промежуточные товары
+  - '46.77' # лом и отходы
+  - '64.20' # холдинг: отрасль группы по этому коду не видна
+
 prefixes:
   '01': agro
   '05': energy
   '06': energy
   '07': metals
-  '07.29': precious_metals
+  '07.29.1': precious_metals
   '10': food
   '19': energy
   '24': metals
@@ -13,23 +24,33 @@ prefixes:
   '41': construction
   '42': construction
   '43': construction
-  '46': trade
+  '46.2': agro
+  '46.3': food
+  '46.4': trade
+  '46.71': energy
+  '46.72': metals
+  '46.90': trade
   '47': trade
+  '47.11': food
+  '47.2': food
+  '47.30': energy
   '49': transport
   '50': transport
   '51': transport
   '52': transport
-  '64': finance
+  '64.1': finance
+  '64.9': finance
   '68': real_estate
+
 themes:
   energy: [commodities_energy]
-  metals: [commodities_energy]
+  metals: [metals]
   precious_metals: [precious_metals]
-  agro: [commodities_energy, sanctions_trade]
+  agro: [sanctions_trade]
   food: [consumption_labor]
   trade: [consumption_labor]
   construction: [monetary_policy]
-  transport: [commodities_energy]
+  transport: []
   finance: [monetary_policy]
   real_estate: [monetary_policy]
   utilities: [regulation_tax]

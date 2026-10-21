@@ -75,7 +75,7 @@ def test_industry_and_exposures_follow_config():
     assert "commodity_precious" in _ids(precious)
     assert "commodity_metals" not in _ids(precious)
 
-    saver = _built("46.71", CL_PRODUCT_DEP_MARK="1", CL_PRODUCT_LOA_MARK="0", CL_PRODUCT_LEA_MARK="0")
+    saver = _built("46.90", CL_PRODUCT_DEP_MARK="1", CL_PRODUCT_LOA_MARK="0", CL_PRODUCT_LEA_MARK="0")
     assert next(item.value for item in saver.features if item.id == "okved_theme") == "trade"
     assert "consumption" in _ids(saver)
     assert "rate_saver" in _ids(saver)

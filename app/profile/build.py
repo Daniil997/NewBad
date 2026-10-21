@@ -59,6 +59,10 @@ class Feature(BaseModel):
 
 class Exposure(BaseModel):
     id: str
+    title: str
+    basis: str
+    source: str
+    confidence: str
     strength: float
     feature_refs: list[str]
     assumptions: list[str]
@@ -102,8 +106,8 @@ def load_profiles() -> list[ClientProfile]:
     companies = read_csv(company_path)
     payments = read_csv(payments_csv()) if payments_csv() else []
     rules = _load_yaml(ROOT / "config" / "exposures.yaml")["exposures"]
-    themes = _load_yaml(ROOT / "config" / "okved_map.yaml")["prefixes"]
-    return _build_profiles(companies, payments, rules, themes)
+    prefixes, ambiguous = _okved_rules()
+    return _build_profiles(companies, payments, rules, prefixes, ambiguous)
 
 
 def get_profile(client_id: str) -> ClientProfile | None:
@@ -128,6 +132,7 @@ def _build_profiles(
     payments: list[dict[str, str]],
     rules: dict,
     prefixes: dict[str, str],
+    ambiguous: list[str] | None = None,
 ) -> list[ClientProfile]:
     by_id = {_text(row.get("SYNTHETIC_U")): row for row in companies if _text(row.get("SYNTHETIC_U"))}
     cohort_revenue = _sum_by(
@@ -210,7 +215,7 @@ def _build_profiles(
                 )
             )
 
-        theme = _theme(_text(row.get("MAINOKVED_CODE")), prefixes)
+        theme = _theme(_text(row.get("MAINOKVED_CODE")), prefixes, ambiguous)
         if theme:
             features.append(
                 Feature(
@@ -309,6 +314,7 @@ def apply_case_stats(
 def _exposures(row: dict[str, str], rules: dict, theme: str | None, counterparties: list[Counterparty]) -> list[Exposure]:
     found: list[Exposure] = []
     for exposure_id, rule in rules.items():
+        title, basis, source, confidence = _exposure_meta(exposure_id, rule)
         when = rule.get("when") or {}
         refs: list[str] = []
         if "any_flag" in when and any(_flag(row.get(field)) for field in when["any_flag"]):
@@ -324,12 +330,31 @@ def _exposures(row: dict[str, str], rules: dict, theme: str | None, counterparti
         found.append(
             Exposure(
                 id=exposure_id,
+                title=title,
+                basis=basis,
+                source=source,
+                confidence=confidence,
                 strength=float(rule.get("strength", 0)),
                 feature_refs=refs,
                 assumptions=list(rule.get("assumptions") or []),
             )
         )
     return found
+
+
+def _exposure_meta(exposure_id: str, rule: dict) -> tuple[str, str, str, str]:
+    title = str(rule.get("title") or "").strip()
+    basis = str(rule.get("basis") or "").strip()
+    source = str(rule.get("source") or "").strip()
+    confidence = str(rule.get("confidence") or "").strip()
+    known_basis = basis in {"confirmed", "hypothesis"}
+    known_source = source in {"bank_data", "derived", "payments", "client_input"}
+    known_confidence = confidence in {"high", "medium", "low"}
+    if not title or not known_basis or not known_source or not known_confidence:
+        raise ValueError(f"У экспозиции {exposure_id} не заданы название, основание, источник или уверенность")
+    if basis == "hypothesis" and not list(rule.get("assumptions") or []):
+        raise ValueError(f"Отраслевая гипотеза {exposure_id} без оговорки")
+    return title, basis, source, confidence
 
 
 def _links(payments: list[dict[str, str]], companies: dict[str, dict[str, str]]) -> dict[str, list[Counterparty]]:
@@ -399,14 +424,38 @@ def _cohort_key(row: dict[str, str]) -> str | None:
     return code.split(".", 1)[0]
 
 
-def _theme(code: str, prefixes: dict[str, str]) -> str | None:
-    best: str | None = None
+def _okved_rules() -> tuple[dict[str, str], list[str]]:
+    payload = _load_yaml(ROOT / "config" / "okved_map.yaml")
+    prefixes = {str(prefix): str(theme) for prefix, theme in payload["prefixes"].items()}
+    ambiguous = [str(item) for item in payload.get("ambiguous") or []]
+    return prefixes, ambiguous
+
+
+def _theme(code: str, prefixes: dict[str, str], ambiguous: list[str] | None = None) -> str | None:
+    """Самый длинный цифровой префикс. Неоднозначный код длиннее родителя тему не получает."""
+    digits = _okved_digits(code)
+    if not digits:
+        return None
+    theme_length, theme = _longest_okved(digits, prefixes)
+    blocked_length, _blocked = _longest_okved(digits, {item: "" for item in ambiguous or []})
+    if theme is None or blocked_length >= theme_length:
+        return None
+    return theme
+
+
+def _longest_okved(digits: str, prefixes: dict[str, str]) -> tuple[int, str | None]:
     best_length = -1
+    best: str | None = None
     for prefix, theme in prefixes.items():
-        if code.startswith(str(prefix)) and len(str(prefix)) > best_length:
-            best = str(theme)
-            best_length = len(str(prefix))
-    return best
+        needle = _okved_digits(prefix)
+        if needle and digits.startswith(needle) and len(needle) > best_length:
+            best = theme
+            best_length = len(needle)
+    return best_length, best
+
+
+def _okved_digits(value: str) -> str:
+    return "".join(character for character in str(value) if character.isdigit())
 
 
 def _group_rank(client_id: str, group: str, companies: dict[str, dict[str, str]]) -> int:

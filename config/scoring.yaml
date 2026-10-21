@@ -1,13 +1,40 @@
-# Веса формулы: score = type*сила_экспозиции + entity*совпадение + scale*материальность + bank*покрытие + fresh*свежесть - dup*дубликат
+# Балл — сумма компонентов. В объяснение попадает только ненулевое слагаемое.
+# exposure: лучшая подтверждённая экспозиция этого типа события.
+# industry: лучшая отраслевая гипотеза, и только если подтверждённой экспозиции нет.
+# bank: у банка есть материал по теме. source: качество адреса. fresh: дата публикации.
+# scale: масштаб компании, только вместе со связью экспозиции или отрасли.
+# entity: страна, город, регион или контрагент в тексте, если эта экспозиция ещё не учтена.
+# duplicate: более старая новость того же типа. gap: доля пропусков из gap_fields.
+# Порядок ленты: балл, затем дата, затем id. Все три по убыванию.
 weights:
-  type: 0.35
-  entity: 0.25
-  scale: 0.15
+  exposure: 0.40
+  industry: 0.20
   bank: 0.15
+  source: 0.10
   fresh: 0.10
-  dup: 0.50
+  scale: 0.05
+  entity: 0.10
+  duplicate: 0.50
+  gap: 0.10
+
+gap_fields:
+  - REVENUE_COMPANY
+  - MAINOKVED_CODE
+  - REGION
+
+source_quality:
+  high: [cbr.ru, rosstat.gov.ru, minfin.gov.ru]
+  medium: [eia.gov, lbma.org.uk]
+  values:
+    high: 1.0
+    medium: 0.7
+    low: 0.4
+    none: 0.2
+
 thresholds:
-  show: 0.30
+  high: 0.35
+  extra: 0.15
   top_n: 6
+
 freshness:
   half_life_days: 14

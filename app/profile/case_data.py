@@ -6,7 +6,15 @@ import duckdb
 import yaml
 
 from app.db import ROOT
-from app.profile.build import ClientProfile, _build_profiles, _cohort_key, _load_yaml, _money, apply_case_stats
+from app.profile.build import (
+    ClientProfile,
+    _build_profiles,
+    _cohort_key,
+    _load_yaml,
+    _money,
+    _okved_rules,
+    apply_case_stats,
+)
 from app.profile.sources import COMPANY_COLUMNS, companies_csv, payments_csv, persons_csv
 
 _CACHE: dict[str, ClientProfile | None] = {}
@@ -30,8 +38,8 @@ def case_profile(client_id: str) -> ClientProfile | None:
     profile = None
     if row is not None:
         rules = _load_yaml(ROOT / "config" / "exposures.yaml")["exposures"]
-        themes = _load_yaml(ROOT / "config" / "okved_map.yaml")["prefixes"]
-        built = _build_profiles([row], _payment_rows(client_id), rules, themes)
+        prefixes, ambiguous = _okved_rules()
+        built = _build_profiles([row], _payment_rows(client_id), rules, prefixes, ambiguous)
         if built:
             share, rank, size = _aggregates(row)
             profile = _with_groups(

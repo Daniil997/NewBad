@@ -136,7 +136,7 @@ event_types:
       - {phrase: импорт}
       - {phrase: тариф}
       - {phrase: ограничени, broad: true}
-    exposures: [fx_exposure, country_exposure]
+    exposures: [foreign_trade, country_exposure, fx_exposure]
     weight: 0.8
     bank_topics: []
   counterparty:
