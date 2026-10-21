@@ -54,13 +54,9 @@ def clear_case_cache() -> None:
 
 
 def appendix_paths() -> list[Path]:
-    from app.profile.sources import bank_pdf_dir
+    from app.profile.bank_catalog import load_bank_appendix
 
-    folder = bank_pdf_dir()
-    if folder is None:
-        return []
-    payload = yaml.safe_load((ROOT / "config" / "bank_appendix.yaml").read_text(encoding="utf-8"))
-    return [folder / str(item["file"]) for item in payload["documents"]]
+    return [item.path for item in load_bank_appendix()]
 
 
 def _showcase() -> list[str]:

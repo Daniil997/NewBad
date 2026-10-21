@@ -1,29 +1,67 @@
-# Материалы приложения 2 кейса. Файлы лежат в Doc/Данные данные, в git их нет.
+# Каталог PDF приложения 2. Запись в этом файле не означает, что текст документа прочитан.
+# Дата берётся из имени файла. Если в имени только месяц или период, день не выдумывается.
+# В тексте кейса девятый материал назван commodities performance. В папке вместо него обзор стали от 15 апреля 2021.
 documents:
-  - file: ALFA-Macro_Insights-Policy_Rate_11Sep.pdf
+  - id: key_rate
+    file: ALFA-Macro_Insights-Policy_Rate_11Sep.pdf
+    title: Ключевая ставка, 11 сентября 2026
+    date: 2026-09-11
+    type: monetary_policy
     topic: key_rate
-    title: Ключевая ставка, 11 сентября
-  - file: Inflation_tracker_02.pdf
+    source: bank_analytics
+  - id: inflation
+    file: Inflation_tracker_02.pdf
+    title: Инфляция, 25–31 августа
+    date: 2026-08
+    type: inflation_macro
     topic: inflation
-    title: Инфляция
-  - file: Бонд_Бриф_14092026.pdf
-    topic: bonds
+    source: bank_analytics
+  - id: bond_brief
+    file: Бонд_Бриф_14092026.pdf
     title: Бонд-бриф, 14 сентября 2026
-  - file: Gold_digest_August26.pdf
-    topic: gold
+    date: 2026-09-14
+    type: monetary_policy
+    topic: bonds
+    source: bank_analytics
+  - id: gold
+    file: Gold_digest_August26.pdf
     title: Обзор рынка золота, август 2026
-  - file: FI_Strategy_3Q26_22072026.pdf
-    topic: strategy
+    date: 2026-08
+    type: precious_metals
+    topic: gold
+    source: bank_analytics
+  - id: strategy_3q
+    file: FI_Strategy_3Q26_22072026.pdf
     title: Тактический взгляд на 3-й квартал 2026
-  - file: ALFA-7M26.pdf
+    date: 2026-07-22
+    type: monetary_policy
+    topic: strategy
+    source: bank_analytics
+  - id: macro_7m
+    file: ALFA-7M26.pdf
+    title: Макростатистика, 7 месяцев 2026
+    date: 2026-07
+    type: inflation_macro
     topic: macro
-    title: Макростатистика 7 месяцев 2026
-  - file: ALFA-consumption.pdf
+    source: bank_analytics
+  - id: consumption
+    file: ALFA-consumption.pdf
+    title: Потребление на пике
+    date: unknown
+    type: consumption_labor
     topic: consumption
-    title: Потребление
-  - file: ALFA-macro_stat1H26.pdf
+    source: bank_analytics
+  - id: macro_1h
+    file: ALFA-macro_stat1H26.pdf
+    title: Макростатистика, 1 полугодие 2026
+    date: 2026-06
+    type: inflation_macro
     topic: macro
-    title: Макростатистика 1 полугодие 2026
-  - file: ALFA_Russian_Steels_1К21PreviewUpdate_15Apr2021.pdf
+    source: bank_analytics
+  - id: steels
+    file: ALFA_Russian_Steels_1К21PreviewUpdate_15Apr2021.pdf
+    title: Российская сталь, 15 апреля 2021
+    date: 2021-04-15
+    type: commodities_energy
     topic: metals
-    title: Российская сталь
+    source: bank_analytics
