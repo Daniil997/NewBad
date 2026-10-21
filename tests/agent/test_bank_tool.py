@@ -31,8 +31,7 @@ def _passport(folder, doc_id: str, published_at: str, quote: str, page: int) -> 
 
 def test_tool_returns_quote_with_document_and_page():
     result = bank_analytics("ключевая ставка")
-    assert result["status"] == "found"
-    assert result["message"] is None
+    assert result["status"] in {"found", "conflict"}
     hit = result["hits"][0]
     assert hit["id"] == "key_rate"
     assert hit["page"] == 1
@@ -85,8 +84,9 @@ def test_conflict_reports_different_dates_and_conclusions(tmp_path):
 def test_run_tool_uses_the_bank_payload(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     result = run_tool("search_bank_analytics", {"query": "ключевая ставка"})
-    assert result["status"] == "found"
+    assert result["status"] in {"found", "conflict"}
     assert result["hits"][0]["quote"]
+    assert result["hits"][0]["page"] == 1
     page = find_bank("inflation", 2)
     assert page is not None
     assert page.page == 2

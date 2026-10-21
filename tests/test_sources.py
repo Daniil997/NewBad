@@ -9,6 +9,8 @@ from app.profile.sources import (
     companies_csv,
     describe_csv,
     read_csv,
+    bank_pdf_dir,
+    case_dir,
 )
 
 _COMPANY_HEADER = ";".join(sorted(COMPANY_COLUMNS))
@@ -45,6 +47,28 @@ def test_missing_configured_folder_is_not_demo(tmp_path, monkeypatch):
     with pytest.raises(SourceError) as raised:
         companies_csv()
     assert raised.value.kind == "missing"
+
+
+def test_discovers_split_case_data_layout(tmp_path, monkeypatch):
+    import app.profile.sources as sources
+
+    project = tmp_path / "NewBad"
+    profile_folder = project.parent / "DATA" / "company_profile"
+    bank_folder = project.parent / "DATA" / "bank_analytics"
+    profile_folder.mkdir(parents=True)
+    bank_folder.mkdir(parents=True)
+    values = {name: "" for name in COMPANY_COLUMNS}
+    values["SYNTHETIC_U"] = "U_1"
+    line = ";".join(values[name] for name in sorted(COMPANY_COLUMNS))
+    _company_csv(profile_folder / "df_Uid_data_hack.csv", line + "\n")
+    monkeypatch.setattr(sources, "ROOT", project)
+    monkeypatch.delenv("PROFILE_SOURCE", raising=False)
+    monkeypatch.delenv("CASE_DATA_DIR", raising=False)
+    monkeypatch.delenv("BANK_PDF_DIR", raising=False)
+
+    assert case_dir() == profile_folder
+    assert companies_csv() == profile_folder / "df_Uid_data_hack.csv"
+    assert bank_pdf_dir() == bank_folder
 
 
 def test_empty_file_wrong_schema_and_no_rows(tmp_path):

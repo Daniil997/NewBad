@@ -1,8 +1,8 @@
 import pytest
 import yaml
 
-from app.db import ROOT
 from app.profile.bank_catalog import BankCatalogError, load_bank_appendix
+from app.profile.sources import bank_pdf_dir
 
 _ROW = {
     "id": "key_rate",
@@ -59,9 +59,9 @@ def test_missing_file_and_unknown_type_are_errors(tmp_path):
 
 
 def test_real_appendix_lists_nine_files_without_processing():
-    folder = ROOT.parent / "Doc" / "Данные данные"
-    if not folder.is_dir():
-        pytest.skip("Рядом нет папки Doc/Данные данные")
+    folder = bank_pdf_dir()
+    if folder is None:
+        pytest.skip("Рядом нет папки DATA/bank_analytics или Doc/Данные данные")
     items = load_bank_appendix()
     assert len(items) == 9
     assert {item.id for item in items} == {

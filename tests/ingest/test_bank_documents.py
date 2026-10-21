@@ -144,7 +144,10 @@ def test_ocr_failure_duplicate_and_mismatch_are_visible(tmp_path):
 
 
 def test_inflation_scan_ocr_matches_a_second_read():
-    pdf = ROOT.parent / "Doc" / "Данные данные" / "Inflation_tracker_02.pdf"
+    from app.profile.sources import bank_pdf_dir
+
+    pdf_dir = bank_pdf_dir()
+    pdf = (pdf_dir / "Inflation_tracker_02.pdf") if pdf_dir is not None else ROOT / "missing.pdf"
     tessdata = ROOT / "data" / "tessdata" / "rus.traineddata"
     if not pdf.is_file() or not tessdata.is_file():
         pytest.skip("Нет скана инфляции или rus.traineddata")

@@ -130,7 +130,7 @@ def persons_csv() -> Path | None:
 
 
 def case_dir() -> Path | None:
-    """Папка с CSV выгрузки. Сначала CASE_DATA_DIR, затем ../DATA, затем прежний путь."""
+    """Папка с CSV: CASE_DATA_DIR, новая DATA/company_profile, затем прежние пути."""
     raw = os.environ.get("CASE_DATA_DIR")
     if raw:
         path = Path(raw)
@@ -141,15 +141,16 @@ def case_dir() -> Path | None:
 
 
 def bank_pdf_dir() -> Path | None:
-    """PDF аналитики банка. Сейчас они остаются в Doc/Данные данные."""
+    """Папка с PDF аналитики банка: BANK_PDF_DIR, новая DATA/bank_analytics, затем прежний путь."""
     raw = os.environ.get("BANK_PDF_DIR")
     if raw:
         path = Path(raw)
         return path if path.is_dir() else None
+    data = ROOT.parent / "DATA" / "bank_analytics"
+    if data.is_dir():
+        return data
     legacy = ROOT.parent / "Doc" / "Данные данные"
-    if legacy.is_dir():
-        return legacy
-    return _discovered_case_dir()
+    return legacy if legacy.is_dir() else None
 
 
 def _ready(path: Path, required: set[str]) -> Path:
@@ -167,6 +168,9 @@ def _case_file(name: str) -> Path:
 
 def _discovered_case_dir() -> Path | None:
     data = ROOT.parent / "DATA"
+    profile_data = data / "company_profile"
+    if (profile_data / CASE_COMPANIES).is_file():
+        return profile_data
     if (data / CASE_COMPANIES).is_file():
         return data
     legacy = ROOT.parent / "Doc" / "Данные данные"

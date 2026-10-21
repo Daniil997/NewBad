@@ -157,7 +157,7 @@ def search_bank_analytics(query: str, limit: int = 5, folder: Path | None = None
         ranked = _rank_tokens(content, corpus)
     except Exception as error:
         raise CorpusError("index", f"Индекс банка не построен: {error.__class__.__name__}") from error
-    hits: list[SearchHit] = []
+    hits: list[tuple[bool, SearchHit]] = []
     for index, score in ranked:
         item = documents[index]
         matched = set(content) & set(_tokenize(corpus[index], stem=True))
@@ -165,20 +165,23 @@ def search_bank_analytics(query: str, limit: int = 5, folder: Path | None = None
         if strength == "weak":
             continue
         hits.append(
-            SearchHit(
-                id=item.doc_id,
-                title=item.title,
-                score=round(score, 4),
-                excerpt=_excerpt(item, matched),
-                event_type=item.topic,
-                published_at=item.published_at,
-                page=item.page,
-                source_type=item.source_type,
-                strength=strength,
+            (
+                bool(item.theses),
+                SearchHit(
+                    id=item.doc_id,
+                    title=item.title,
+                    score=round(score, 4),
+                    excerpt=_excerpt(item, matched),
+                    event_type=item.topic,
+                    published_at=item.published_at,
+                    page=item.page,
+                    source_type=item.source_type,
+                    strength=strength,
+                ),
             )
         )
-    hits.sort(key=lambda hit: (_STRENGTH_RANK[hit.strength or "narrow"], hit.score), reverse=True)
-    return hits[:limit]
+    hits.sort(key=_hit_order, reverse=True)
+    return [hit for _curated, hit in hits[:limit]]
 
 
 def _rank(query: str, documents: list[str]) -> list[tuple[int, float]]:
@@ -274,6 +277,11 @@ def _strength(matched: set[str]) -> str:
 
 
 _STRENGTH_RANK = {"strong": 2, "narrow": 1}
+
+
+def _hit_order(item: tuple[bool, SearchHit]) -> tuple[int, bool, float]:
+    curated, hit = item
+    return (_STRENGTH_RANK[hit.strength or "narrow"], curated, hit.score)
 
 
 def _rank_tokens(tokens: list[str], documents: list[str]) -> list[tuple[int, float]]:

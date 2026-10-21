@@ -8,6 +8,7 @@ import yaml
 from pydantic import BaseModel
 
 from app.db import ROOT
+from app.profile.sources import bank_pdf_dir
 
 _REQUIRED = ("id", "file", "title", "date", "type", "topic", "source")
 _DATE = re.compile(r"^\d{4}-\d{2}(-\d{2})?$")
@@ -84,15 +85,12 @@ def _catalog_path() -> Path:
 
 
 def _pdf_dir() -> Path:
+    path = bank_pdf_dir()
+    if path is not None:
+        return path
     raw = os.environ.get("BANK_PDF_DIR")
     if raw:
-        path = Path(raw)
-        if not path.is_dir():
-            raise BankCatalogError("missing", f"Папка PDF не найдена: {path.name or raw}")
-        return path
-    legacy = ROOT.parent / "Doc" / "Данные данные"
-    if legacy.is_dir():
-        return legacy
+        raise BankCatalogError("missing", f"Папка PDF не найдена: {Path(raw).name or raw}")
     raise BankCatalogError("missing", "Папка PDF не найдена: Данные данные")
 
 
