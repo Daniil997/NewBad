@@ -48,10 +48,12 @@ def corpus_version() -> str:
 
 def _score_feed(profile: ClientProfile, today: date, version: str) -> Feed:
     config = yaml.safe_load((ROOT / "config" / "scoring.yaml").read_text(encoding="utf-8"))
-    taxonomy = yaml.safe_load((ROOT / "config" / "taxonomy.yaml").read_text(encoding="utf-8"))["event_types"]
+    payload = yaml.safe_load((ROOT / "config" / "taxonomy.yaml").read_text(encoding="utf-8"))
+    taxonomy = payload["event_types"]
+    unknown = str((payload.get("classification") or {}).get("unknown") or "unknown")
     weights = config["weights"]
     news = load_news()
-    newest = _newest_by_type(news)
+    newest = _newest_by_type(news, unknown)
     bank_topics = {item.topic for item in load_bank_documents()}
     scale = _scale(profile)
     items: list[FeedItem] = []
@@ -62,7 +64,8 @@ def _score_feed(profile: ClientProfile, today: date, version: str) -> Feed:
         entity = _entity_match(profile, f"{item.title} {item.excerpt}")
         bank = 1.0 if bank_topics & set(spec.get("bank_topics") or []) else 0.0
         fresh = _freshness(item.published_at, today, float(config["freshness"]["half_life_days"]))
-        duplicate = 1.0 if item.event_type and item.published_at < newest.get(item.event_type, item.published_at) else 0.0
+        same_type = item.event_type not in {None, "", unknown}
+        duplicate = 1.0 if same_type and item.published_at < newest.get(item.event_type, item.published_at) else 0.0
         score = (
             weights["type"] * strength
             + weights["entity"] * entity
@@ -132,10 +135,10 @@ def _freshness(published_at: str, today: date, half_life_days: float) -> float:
     return 0.5 ** (age / half_life_days)
 
 
-def _newest_by_type(news) -> dict[str, str]:
+def _newest_by_type(news, unknown: str) -> dict[str, str]:
     newest: dict[str, str] = {}
     for item in news:
-        if not item.event_type:
+        if not item.event_type or item.event_type == unknown:
             continue
         current = newest.get(item.event_type)
         if current is None or item.published_at > current:

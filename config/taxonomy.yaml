@@ -1,56 +1,155 @@
 # Типы событий. Новый тип добавляется записью, код не меняется.
+# Классификация:
+# 1. Точный триггер — свидетельство категории. Один общий триггер не считается: нужны два общих.
+# 2. Побеждает категория с большим числом точных триггеров. Приоритет этот перевес не перекрывает.
+# 3. Одинаковое число точных триггеров у двух категорий — «неизвестно/неоднозначно», даже если приоритеты разные.
+# 4. Нет свидетельств — та же категория, а не догадка.
+# Приоритет — насколько категория конкретна (0–99). Это не вес в ленте.
+classification:
+  unknown: unknown
+  min_broad_hits: 2
+
 event_types:
   monetary_policy:
-    title: Денежно-кредитная политика
-    triggers: ['ключевая ставка', 'ставк', 'совет директоров банка россии', 'денежно-кредитн']
+    title: Ключевая ставка и денежно-кредитная политика
+    priority: 90
+    triggers:
+      - {all: [ключев, ставк]}
+      - {phrase: денежно-кредитн}
+      - {phrase: совет директоров банка россии}
+      - {phrase: ставк, broad: true}
     exposures: [rate_borrower, rate_saver]
     weight: 1.0
     bank_topics: [key_rate, tactical_q3, bond_brief]
+  bonds:
+    title: Облигации
+    priority: 80
+    triggers:
+      - {phrase: облигац}
+      - {phrase: офз}
+      - {phrase: бонд}
+    exposures: [rate_borrower, rate_saver]
+    weight: 0.8
+    bank_topics: [bonds]
   inflation_macro:
-    title: Инфляция и макростатистика
-    triggers: ['инфляц', 'ввп', 'росстат', 'макростатистик']
+    title: Инфляция
+    priority: 60
+    triggers:
+      - {phrase: инфляц}
+      - {phrase: ипц}
+      - {phrase: потребительские цены}
+      - {phrase: потребительских цен}
     exposures: [rate_borrower, rate_saver, consumption]
     weight: 0.8
-    bank_topics: [inflation, macro_7m26, macro_1h26]
+    bank_topics: [inflation]
+  macro:
+    title: Макроэкономика
+    priority: 60
+    triggers:
+      - {phrase: ввп}
+      - {phrase: макростатистик}
+      - {phrase: промпроизводств}
+      - {phrase: промышленное производство}
+    exposures: [rate_borrower, rate_saver, consumption]
+    weight: 0.7
+    bank_topics: [macro]
   fx:
     title: Валютный рынок
-    triggers: ['курс рубля', 'юан', 'доллар', 'валютн']
+    priority: 70
+    triggers:
+      - {phrase: курс рубля}
+      - {phrase: юан}
+      - {phrase: доллар}
+      - {phrase: валютн}
     exposures: [fx_exposure]
     weight: 0.9
     bank_topics: [tactical_q3]
   commodities_energy:
     title: Сырьё и энергоносители
-    triggers: ['нефть', 'brent', 'urals', 'газ', 'уголь', 'сырь']
+    priority: 70
+    triggers:
+      - {phrase: нефть}
+      - {phrase: brent}
+      - {phrase: urals}
+      - {phrase: газ}
+      - {phrase: угл}
+      - {phrase: сырь, broad: true}
     exposures: [commodity_energy, commodity_metals]
     weight: 0.8
     bank_topics: [commodities]
+  metals:
+    title: Металлы
+    priority: 80
+    triggers:
+      - {phrase: сталь}
+      - {phrase: стальн}
+      - {phrase: алюмини}
+      - {phrase: никел}
+      - {phrase: медь}
+      - {phrase: медн}
+      - {phrase: металлург}
+    exposures: [commodity_metals]
+    weight: 0.8
+    bank_topics: [metals]
   precious_metals:
     title: Драгоценные металлы
-    triggers: ['золот', 'серебр', 'платин', 'палладий']
+    priority: 80
+    triggers:
+      - {phrase: золот}
+      - {phrase: серебр}
+      - {phrase: платин}
+      - {phrase: палладий}
     exposures: [commodity_precious]
     weight: 0.8
     bank_topics: [gold]
+  consumption_labor:
+    title: Потребление и рынок труда
+    priority: 50
+    triggers:
+      - {phrase: рынок труда}
+      - {phrase: безработиц}
+      - {phrase: потреблени}
+      - {phrase: потребительский спрос}
+      - {phrase: потребительские расходы}
+      - {phrase: зарплат}
+    exposures: [consumption]
+    weight: 0.6
+    bank_topics: [consumption]
   regulation_tax:
     title: Регулирование и налоги
-    triggers: ['налог', 'закон', 'постановление', 'пошлин', 'регулир']
+    priority: 50
+    triggers:
+      - {phrase: налог}
+      - {phrase: пошлин}
+      - {phrase: регулир}
+      - {phrase: постановлен}
+      - {phrase: закон, broad: true}
     exposures: [sector_regulation]
     weight: 0.7
     bank_topics: []
   sanctions_trade:
     title: Санкции и торговые ограничения
-    triggers: ['санкци', 'экспорт', 'импорт', 'тариф', 'ограничени']
+    priority: 50
+    triggers:
+      - {phrase: санкци}
+      - {phrase: экспорт}
+      - {phrase: импорт}
+      - {phrase: тариф}
+      - {phrase: ограничени, broad: true}
     exposures: [fx_exposure, country_exposure]
     weight: 0.8
     bank_topics: []
-  consumption_labor:
-    title: Рынок труда и потребление
-    triggers: ['рынок труда', 'безработиц', 'потреблен', 'зарплат']
-    exposures: [consumption]
-    weight: 0.6
-    bank_topics: [consumption_peak, macro_7m26]
   counterparty:
     title: События контрагентов
+    priority: 40
     triggers: []
     exposures: [counterparty]
     weight: 1.0
+    bank_topics: []
+  unknown:
+    title: Неизвестно/неоднозначно
+    priority: 0
+    triggers: []
+    exposures: []
+    weight: 0
     bank_topics: []
