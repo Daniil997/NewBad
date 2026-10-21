@@ -81,9 +81,12 @@ def _gather(ctx: AgentContext) -> None:
             ctx.news = find_news(ctx.event_id)
         elif name == "search_bank_analytics":
             assert ctx.news is not None
-            hits = run_tool(name, {"query": bank_query(ctx.news.event_type, ctx.news.title)})
-            if isinstance(hits, list) and hits:
-                ctx.bank = find_bank(str(hits[0]["id"]))
+            payload = run_tool(name, {"query": bank_query(ctx.news.event_type, ctx.news.title)})
+            if isinstance(payload, dict):
+                ctx.bank_note = payload.get("message")
+                hits = payload.get("hits") or []
+                if hits:
+                    ctx.bank = find_bank(str(hits[0]["id"]), hits[0].get("page"))
         elif name == "get_counterparties":
             run_tool(name, {"client_id": ctx.client_id})
             fresh = get_profile(ctx.client_id)

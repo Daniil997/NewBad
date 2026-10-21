@@ -12,6 +12,7 @@ class AgentContext:
     profile: ClientProfile | None = None
     news: NewsItem | None = None
     bank: BankDocument | None = None
+    bank_note: str | None = None
     counterparties: list[Counterparty] = field(default_factory=list)
     planned_tools: list[str] = field(default_factory=list)
     matched: list[str] = field(default_factory=list)

@@ -57,6 +57,8 @@ def assemble(ctx: AgentContext, copy: dict[str, str] | None = None) -> Card:
     primary = ctx.matched[0] if ctx.matched else None
     feature_refs = _feature_refs(ctx, primary)
     assumptions = _assumptions(ctx)
+    if ctx.bank is not None and ctx.bank_note:
+        assumptions.append(ctx.bank_note)
     rate = "14%" if "14" in f"{news.title} {news.excerpt}" else "из новости"
     sources = _sources(ctx, feature_refs)
     fact = Claim(
@@ -87,7 +89,7 @@ def assemble(ctx: AgentContext, copy: dict[str, str] | None = None) -> Card:
             )
         )
     else:
-        missing.append("Нет материала банка по теме события.")
+        missing.append(ctx.bank_note or "Нет материала банка по теме события.")
     why = Claim(
         id="why-1",
         text=(copy or {}).get("why") or _why_text(primary),
