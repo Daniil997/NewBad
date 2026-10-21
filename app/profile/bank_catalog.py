@@ -91,7 +91,7 @@ def _pdf_dir() -> Path:
     raw = os.environ.get("BANK_PDF_DIR")
     if raw:
         raise BankCatalogError("missing", f"Папка PDF не найдена: {Path(raw).name or raw}")
-    raise BankCatalogError("missing", "Папка PDF не найдена: Данные данные")
+    raise BankCatalogError("missing", "Папка PDF не найдена: DATA/bank_analytics")
 
 
 def _taxonomy_types() -> list[str]:
