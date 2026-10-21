@@ -87,6 +87,10 @@ def max_retries() -> int:
     return int(_limits().get("max_retries", 2))
 
 
+def time_budget_s() -> float:
+    return float(_limits().get("timeout_s", 90))
+
+
 def _tier_model(mode: str, tier: str) -> str:
     modes = _config().get("modes") or {}
     entries = ((modes.get(mode) or {}).get("tiers") or {}).get(tier) or []

@@ -20,3 +20,7 @@ class AgentContext:
     retries: int = 0
     issues: list[str] = field(default_factory=list)
     extracted_fact: str | None = None
+    calls: set[str] = field(default_factory=set)
+    tool_reports: list[dict] = field(default_factory=list)
+    search_reasons: list[str] = field(default_factory=list)
+    finish_reason: str = ""
