@@ -272,9 +272,13 @@ def _hash(messages: list[dict[str, str]]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def known_modes() -> tuple[str, ...]:
+    return tuple(str(name) for name in (_config().get("modes") or {}))
+
+
 def _mode_name() -> str:
     mode = os.environ.get("LLM_MODE", "mock")
-    if mode not in (_config().get("modes") or {}):
+    if mode not in known_modes():
         return "mock"
     return mode
 

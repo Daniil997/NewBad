@@ -1,12 +1,5 @@
 import { useEffect, useState } from "react";
 
-type ClientSummary = {
-  client_id: string;
-  title: string;
-  money_role: string;
-  exposure_ids: string[];
-};
-
 type ClientProfile = {
   client_id: string;
   title: string;
@@ -76,15 +69,21 @@ const ORIGIN_LABEL: Record<string, string> = {
 };
 
 const LAYER_LABEL: Record<string, string> = {
-  confirmed_fact: "Факт",
-  bank_position: "Позиция банка",
-  model_inference: "Вывод ИИ",
+  confirmed_fact: "Из новости",
+  bank_position: "Банк",
+  model_inference: "Для вас",
 };
 
-export function Service({ onHome, onSettings }: { onHome: () => void; onSettings: () => void }) {
-  const [clients, setClients] = useState<ClientSummary[]>([]);
-  const [clientsPhase, setClientsPhase] = useState<Phase>("loading");
-  const [selected, setSelected] = useState("");
+export function Service({
+  clientId,
+  onHome,
+  onLogout,
+}: {
+  clientId: string;
+  onHome: () => void;
+  onLogout: () => void;
+}) {
+  const selected = clientId;
   const [profile, setProfile] = useState<ClientProfile | null>(null);
   const [feed, setFeed] = useState<Feed | null>(null);
   const [feedPhase, setFeedPhase] = useState<Phase>("loading");
@@ -101,40 +100,11 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
   const [pasteText, setPasteText] = useState("");
   const [pasteBusy, setPasteBusy] = useState(false);
   const [pasteError, setPasteError] = useState("");
-  const [listError, setListError] = useState("");
   const [profileError, setProfileError] = useState("");
   const [feedError, setFeedError] = useState("");
   const [cardError, setCardError] = useState("");
   const [feedbackSent, setFeedbackSent] = useState(false);
   const [attempt, setAttempt] = useState(0);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setClientsPhase("loading");
-    setListError("");
-    void fetch("/api/clients", { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`Список компаний: ${response.status}`);
-        }
-        return response.json() as Promise<ClientSummary[]>;
-      })
-      .then((items) => {
-        setClients(items);
-        setClientsPhase(items.length === 0 ? "empty" : "ready");
-        const borrower = items.find((item) => item.money_role === "borrower");
-        setSelected((current) => current || (borrower ?? items[0])?.client_id || "");
-      })
-      .catch((reason: unknown) => {
-        if (!controller.signal.aborted) {
-          setClientsPhase("error");
-          setFeedPhase("empty");
-          setCardPhase("empty");
-          setListError(reason instanceof Error ? reason.message : "Не удалось загрузить компании");
-        }
-      });
-    return () => controller.abort();
-  }, [attempt]);
 
   useEffect(() => {
     if (!selected) {
@@ -246,14 +216,20 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
       });
       if (!response.ok) {
         setFailedQuestion(cleaned);
-        setMessages((current) => [...current, { role: "service", text: `Не удалось ответить: ${response.status}` }]);
+        setMessages((current) => [
+          ...current,
+          { role: "service", text: "Не получилось ответить. Нажмите «Повторить вопрос»." },
+        ]);
         return;
       }
       const payload = (await response.json()) as { answer: string };
-      setMessages((current) => [...current, { role: "service", text: payload.answer }]);
+      setMessages((current) => [...current, { role: "service", text: plainAnswer(payload.answer) }]);
     } catch {
       setFailedQuestion(cleaned);
-      setMessages((current) => [...current, { role: "service", text: "Нет ответа от сервера" }]);
+      setMessages((current) => [
+        ...current,
+        { role: "service", text: "Сервер не ответил. Нажмите «Повторить вопрос»." },
+      ]);
     } finally {
       setAsking(false);
     }
@@ -299,7 +275,7 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
     if (response.ok) setFeedbackSent(true);
   }
 
-  const problem = listError || profileError || feedError || cardError;
+  const problem = profileError || feedError || cardError;
 
   return (
     <div className="bank">
@@ -307,12 +283,22 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
         <button className="bar-button" type="button" onClick={onHome}>
           Альфа-Бизнес
         </button>
-        <button className="bar-button" type="button" onClick={onSettings}>
-          Настройки
+        <button className="bar-button" type="button" onClick={onLogout}>
+          Выйти
         </button>
       </header>
       <main className="bank-main">
         <h1>Что важно для вашей компании</h1>
+        {profile ? (
+          <p className="session-line">
+            Вы вошли как {profile.title}, {ROLE_LABEL[profile.money_role] ?? profile.money_role}.
+            {profile.exposures.length > 0
+              ? ` Учитываем: ${profile.exposures.map((item) => item.title.toLocaleLowerCase("ru")).join(", ")}.`
+              : ""}
+          </p>
+        ) : (
+          <p>{profileError ? "Профиль не загрузился." : "Загружаем профиль…"}</p>
+        )}
         {problem ? (
           <p className="error">
             {problem}{" "}
@@ -321,68 +307,21 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
             </button>
           </p>
         ) : null}
-        <div className="switcher">
-          {clientsPhase === "loading" ? <p>Загружаем компании…</p> : null}
-          {clientsPhase === "empty" ? <p>Компаний нет.</p> : null}
-          {clients.map((client) => (
-            <button
-              key={client.client_id}
-              type="button"
-              className={client.client_id === selected ? "active" : ""}
-              onClick={() => setSelected(client.client_id)}
-            >
-              {ROLE_LABEL[client.money_role] ?? client.money_role}
-              <span>{client.client_id}</span>
-            </button>
-          ))}
-        </div>
         <div className="workspace">
           <section className="card">
-            {selected && !profile ? (
-              <p>{profileError ? "Профиль не загрузился." : "Загружаем профиль…"}</p>
-            ) : null}
-            {profile ? (
-              <dl>
-                <div>
-                  <dt>Компания</dt>
-                  <dd>{profile.title}</dd>
-                </div>
-                <div>
-                  <dt>Роль</dt>
-                  <dd>{ROLE_LABEL[profile.money_role] ?? profile.money_role}</dd>
-                </div>
-                <div>
-                  <dt>Масштаб</dt>
-                  <dd>
-                    {profile.cohort_share === null
-                      ? "нет выручки"
-                      : `${Math.round(profile.cohort_share * 100)}% когорты ${profile.cohort_key}`}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Не хватает</dt>
-                  <dd>{profile.missing_data.join(", ") || "пропусков нет"}</dd>
-                </div>
-              </dl>
-            ) : null}
-            <h2>Сигналы</h2>
-            {profile && profile.exposures.length > 0 ? (
-              <ul className="signals">
-                {profile.exposures.map((item) => (
-                  <li key={item.id}>{item.title}</li>
-                ))}
-              </ul>
-            ) : (
-              <p>{profile ? "Сигналов нет." : "Сигналы появятся вместе с профилем."}</p>
-            )}
             {selected && feedPhase === "loading" ? <p>Собираем ленту…</p> : null}
             {feedPhase === "error" ? <p>Лента не загрузилась.</p> : null}
             {feed ? (
               <>
-                <h2>Важно для компании</h2>
+                <h2>Важные новости</h2>
+                <p className="hint">Нажмите новость. Справа будет, что она значит для компании.</p>
                 <FeedItems items={feed.top} eventId={eventId} onSelect={setEventId} />
-                <h2>Менее значимо для вас</h2>
-                <FeedItems items={feed.less_relevant} eventId={eventId} onSelect={setEventId} />
+                {feed.less_relevant.length > 0 ? (
+                  <details>
+                    <summary>Остальные новости</summary>
+                    <FeedItems items={feed.less_relevant} eventId={eventId} onSelect={setEventId} />
+                  </details>
+                ) : null}
               </>
             ) : null}
           </section>
@@ -390,12 +329,9 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
             {card && cardPhase === "ready" ? (
               <>
                 <CardBody card={card} />
-                <p className="meta">
-                  Уверенность {Math.round(card.confidence * 100)}%.{" "}
-                  {ORIGIN_LABEL[card.llm_trace.origin ?? "template"] ?? "шаблон"}, режим {card.llm_trace.mode},
-                  повторов проверки {card.llm_trace.retries}
-                </p>
-                <p className="note">Не хватает: {card.missing_data.join(", ") || "пропусков нет"}</p>
+                {card.missing_data.length > 0 ? (
+                  <p className="note">Чтобы сказать точнее, в профиле нет: {humanList(card.missing_data)}.</p>
+                ) : null}
                 <button className="linkish" type="button" onClick={() => setTraceOpen((open) => !open)}>
                   Как получен вывод
                 </button>
@@ -414,7 +350,7 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
                     <p>Спасибо, оценка учтена.</p>
                   ) : (
                     <>
-                      <span>Карточка была полезна?</span>{" "}
+                      <span>Этот разбор полезен?</span>{" "}
                       <button type="button" onClick={() => void sendFeedback(true)}>Да</button>{" "}
                       <button type="button" onClick={() => void sendFeedback(false)}>Нет</button>
                     </>
@@ -434,8 +370,9 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
             )}
           </section>
         </div>
-        <section className="card paste">
-          <h2>Вставить свою новость</h2>
+        <details className="card paste">
+          <summary>Разобрать свою новость</summary>
+          <p className="hint">Вставьте текст. Разбор будет таким же: новость, банк и вывод для компании.</p>
           <input
             value={pasteTitle}
             onChange={(event) => setPasteTitle(event.target.value)}
@@ -453,7 +390,7 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
           <button type="button" onClick={() => void pasteNews()} disabled={pasteBusy || !selected}>
             {pasteBusy ? "Разбираем…" : "Разобрать"}
           </button>
-        </section>
+        </details>
       </main>
     </div>
   );
@@ -481,8 +418,6 @@ function FeedItems({
             onClick={() => onSelect(item.news_id)}
           >
             <strong>{item.title}</strong>
-            <span>{item.score.toFixed(2)}</span>
-            <p>{item.reason}</p>
           </button>
         </li>
       ))}
@@ -491,41 +426,106 @@ function FeedItems({
 }
 
 function CardBody({ card }: { card: InsightCard }) {
+  const caveats = [...card.what_happened.assumptions, ...card.consequences.depends_on];
   return (
     <>
+      <p className="legend">
+        <span>
+          <Badge layer="confirmed_fact" /> из новости
+        </span>
+        <span>
+          <Badge layer="bank_position" /> слова аналитиков банка
+        </span>
+        <span>
+          <Badge layer="model_inference" /> вывод для вашей компании
+        </span>
+      </p>
       <h2>Что произошло</h2>
       <Claims claims={card.what_happened.claims} />
-      {card.what_happened.assumptions.length > 0 ? (
-        <p className="note">Предположение: {card.what_happened.assumptions.join(" ")}</p>
-      ) : null}
-      <h2>Почему это важно этой компании</h2>
+      <h2>Что это значит для вас</h2>
       <Claims claims={card.why_for_company.claims} />
       <h2>Риск</h2>
       <Claims claims={card.consequences.risks} />
       <h2>Возможность</h2>
       <Claims claims={card.consequences.opportunities} />
-      {card.consequences.depends_on.length > 0 ? <p className="note">Зависит от: {card.consequences.depends_on.join(" ")}</p> : null}
-      <h2>Какое действие уместно</h2>
+      <h2>Что сделать</h2>
       <p>
         <Badge layer="model_inference" /> {card.action.next_step}
       </p>
-      <h2>Как это оценивает банк</h2>
+      <Caveats lines={caveats} />
+      <h2>Что говорят аналитики банка</h2>
       {card.bank_view.status === "found" ? (
         <blockquote>
           <Badge layer="bank_position" /> {card.bank_view.quote}
           {card.bank_view.page ? <span className="meta"> стр. {card.bank_view.page}</span> : null}
         </blockquote>
       ) : (
-        <p>Материала банка нет.</p>
+        <p>По этой новости материала банка нет. Вывод выше опирается на новость и профиль компании.</p>
       )}
-      <h2>На чём основан вывод</h2>
+      <h2>Откуда это</h2>
       <ul className="sources">
-        {card.sources.map((source) => (
-          <SourceItem key={source.id} source={source} />
-        ))}
+        {card.sources
+          .filter((source) => source.kind !== "company_feature")
+          .map((source) => (
+            <SourceItem key={source.id} source={source} />
+          ))}
       </ul>
     </>
   );
+}
+
+function Caveats({ lines }: { lines: string[] }) {
+  const unique = [...new Set(lines.map((line) => line.trim()).filter(Boolean))];
+  const gaps = unique.filter((line) => line.startsWith("Неизвестно:"));
+  const dates = unique.filter((line) => line.startsWith("Даты источников"));
+  const rest = unique.filter((line) => !gaps.includes(line) && !dates.includes(line));
+  if (unique.length === 0) {
+    return null;
+  }
+  return (
+    <div className="caveat">
+      {gaps.length > 0 ? <p>{gapSentence(gaps)}</p> : null}
+      {rest.map((line) => (
+        <p key={line}>{line.replace(/^Допущение:\s*/, "")}</p>
+      ))}
+      {dates.length > 0 ? (
+        <details>
+          <summary>Почему даты материалов разные</summary>
+          {dates.map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function gapSentence(gaps: string[]): string {
+  const bodies = humanList(gaps);
+  return `${bodies.charAt(0).toLocaleUpperCase("ru")}${bodies.slice(1)}. В выводе этого нет, потому что в профиле так не указано.`;
+}
+
+function plainAnswer(text: string): string {
+  const unknown = text.match(/^Неизвестно:\s*(.+)$/i);
+  if (unknown) {
+    const body = unknown[1].replace(/\.$/, "");
+    return `${body}. В профиле этого нет, поэтому так и отвечаем.`;
+  }
+  const missing = text.match(/^Не хватает данных:\s*(.+)$/i);
+  if (missing) {
+    return `Чтобы сказать точнее, в профиле нет: ${missing[1]}`;
+  }
+  return text;
+}
+
+function humanList(items: string[]): string {
+  return items
+    .map((item) => {
+      const cleaned = item.replace(/^Неизвестно:\s*/i, "").replace(/\.$/, "");
+      return cleaned.charAt(0).toLocaleLowerCase("ru") + cleaned.slice(1);
+    })
+    .filter(Boolean)
+    .join("; ");
 }
 
 function SourceItem({ source }: { source: Source }) {
@@ -539,17 +539,17 @@ function SourceItem({ source }: { source: Source }) {
   return (
     <li>
       {title}
-      {source.kind === "bank_analytics" && source.page ? <span>стр. {source.page}</span> : null}
-      {source.kind === "bank_analytics" && source.quote ? <q>{source.quote}</q> : null}
+      {source.kind === "bank_analytics" ? (
+        <span>{` · материал банка${source.page ? `, стр. ${source.page}` : ""}`}</span>
+      ) : null}
       {source.kind === "news" && !source.url ? <span>ссылки нет</span> : null}
-      {source.kind === "company_feature" && source.origin ? <span>{source.origin}</span> : null}
     </li>
   );
 }
 
 function Claims({ claims }: { claims: Claim[] }) {
   if (claims.length === 0) {
-    return <p>Нет тезисов.</p>;
+    return <p>По этому пункту вывода нет.</p>;
   }
   return (
     <>
@@ -579,7 +579,10 @@ function Trace({ card, steps }: { card: InsightCard; steps: string[] }) {
         ))}
       </ul>
       <p>Шаги: {steps.length > 0 ? steps.join(" → ") : "журнал шагов ещё пуст"}</p>
-      <p>Повторов самопроверки: {card.llm_trace.retries}</p>
+      <p>
+        {ORIGIN_LABEL[card.llm_trace.origin ?? "template"] ?? "шаблон"}, режим {card.llm_trace.mode}, повторов{" "}
+        {card.llm_trace.retries}, уверенность {Math.round(card.confidence * 100)}%.
+      </p>
       {card.missing_data.length > 0 ? <p>Не хватило: {card.missing_data.join(", ")}</p> : null}
     </div>
   );
@@ -604,10 +607,11 @@ function Chat({
 }) {
   return (
     <div className="chat">
-      <h2>Уточнить</h2>
+      <h2>Спросить</h2>
+      <p className="hint">Спросите своими словами. Ответ строится по этой карточке и материалам банка.</p>
       <div className="quick">
         {questions.map((item) => (
-          <button key={item} type="button" onClick={() => void onAsk(item)} disabled={asking}>
+          <button key={item} className="chip" type="button" onClick={() => void onAsk(item)} disabled={asking}>
             {item}
           </button>
         ))}
@@ -621,7 +625,7 @@ function Chat({
         <input
           value={question}
           onChange={(event) => onQuestion(event.target.value)}
-          placeholder="Свой вопрос"
+          placeholder="Например: что сделать по этой новости?"
           aria-label="Вопрос по карточке"
         />
         <button type="submit" disabled={asking}>
@@ -633,12 +637,20 @@ function Chat({
           Повторить вопрос
         </button>
       ) : null}
+      {messages.length === 0 && !asking ? <p className="hint">Ответ появится здесь.</p> : null}
       <ul className="messages">
         {messages.map((item, index) => (
           <li key={`${item.role}-${index}`} className={item.role}>
+            <span className="who">{item.role === "user" ? "Вы" : "Ответ"}</span>
             {item.text}
           </li>
         ))}
+        {asking ? (
+          <li className="service">
+            <span className="who">Ответ</span>
+            Смотрим карточку…
+          </li>
+        ) : null}
       </ul>
     </div>
   );

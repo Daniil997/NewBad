@@ -25,7 +25,7 @@ from app.profile.build import ClientProfile, ClientSummary, get_profile, load_pr
 from app.schemas.card import Card
 from app.scoring.feed import Feed, build_feed
 from app.llm.placement import decide, placement_label
-from app.llm.router import current_route, local_status
+from app.llm.router import current_route, known_modes, local_status
 from app.agent.tools import find_news
 from app.tracing.journal import latest_steps, read_trace
 
@@ -109,6 +109,16 @@ class SettingsView(BaseModel):
     weights_from_browser: bool
     local_server: str
     placement: str
+    placement_choice: str
+
+
+class SettingsUpdate(BaseModel):
+    mode: str = Field(min_length=1, max_length=40)
+    allow_cloud: bool
+    placement: str = Field(min_length=1, max_length=20)
+
+
+_PLACEMENTS = {"auto", "gpu", "ram"}
 
 
 @app.post("/api/clients/{client_id}/events/{event_id}/card")
@@ -185,6 +195,17 @@ def paste_news(client_id: str, body: PasteNews) -> Card:
     return card
 
 
+@app.post("/api/settings")
+def update_settings(body: SettingsUpdate) -> SettingsView:
+    """Переключает режим текущего процесса. Файл .env и ключ не меняются."""
+    if body.mode not in known_modes() or body.placement not in _PLACEMENTS:
+        raise HTTPException(status_code=400, detail="Некорректные настройки")
+    os.environ["LLM_MODE"] = body.mode
+    os.environ["ALLOW_CLOUD"] = "true" if body.allow_cloud else "false"
+    os.environ["LLM_PLACEMENT"] = body.placement
+    return settings()
+
+
 @app.get("/api/settings")
 def settings() -> SettingsView:
     route = current_route()
@@ -196,6 +217,9 @@ def settings() -> SettingsView:
         active = route.mode
         model = route.model
     place, free = decide()
+    choice = os.environ.get("LLM_PLACEMENT", "auto").strip().lower()
+    if choice not in _PLACEMENTS:
+        choice = "auto"
     return SettingsView(
         mode=os.environ.get("LLM_MODE", "mock"),
         allow_cloud=os.environ.get("ALLOW_CLOUD", "false").lower() == "true",
@@ -204,6 +228,7 @@ def settings() -> SettingsView:
         weights_from_browser=False,
         local_server=server,
         placement=placement_label(place, free),
+        placement_choice=choice,
     )
 
 

@@ -1,4 +1,9 @@
-﻿# Ручной запуск API и интерфейса. Вызывается из start-manual.bat.
+﻿# Ручной запуск, остановка и перезапуск. Вызывается из start-manual.bat.
+param(
+    [Parameter(Position = 0)]
+    [string]$Action = ""
+)
+
 $ErrorActionPreference = "Stop"
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 try { [Console]::OutputEncoding = $OutputEncoding } catch { }
@@ -6,38 +11,192 @@ try { [Console]::OutputEncoding = $OutputEncoding } catch { }
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
-Write-Host ""
-Write-Host "Ручная проверка NewBad"
-Write-Host "Интерфейс: http://127.0.0.1:5173"
-Write-Host "API:       http://127.0.0.1:8000/docs"
-Write-Host "Режим берётся из .env. Остановка: Ctrl+C в этом окне."
-Write-Host ""
-Write-Host "В сервисе: компания, карточка, источник и страница, затем вопрос."
-Write-Host "Для U_26030 в .env нужно PROFILE_SOURCE=case."
-Write-Host "В demo компании называются U-BORROWER, U-SAVER и U-PEER."
-Write-Host "Вставка новости: блок «Вставить свою новость», кнопка «Разобрать»."
-Write-Host ""
-
-$busy = $false
-$client = New-Object System.Net.Sockets.TcpClient
-try {
-    $client.Connect("127.0.0.1", 8000)
-    $busy = $true
-} catch {
-    $busy = $false
-} finally {
-    $client.Dispose()
+function Get-ListeningPids {
+    param([int]$Port)
+    $found = New-Object System.Collections.Generic.List[int]
+    foreach ($line in (& netstat.exe -ano -p tcp)) {
+        if ($line -match "^\s*TCP\s+\S+:$Port\s+\S+\s+(LISTENING|ПРОСЛУШИВАНИЕ)\s+(\d+)\s*$") {
+            $procId = [int]$Matches[2]
+            if ($procId -gt 0 -and -not $found.Contains($procId)) {
+                [void]$found.Add($procId)
+            }
+        }
+    }
+    return $found
 }
 
-if ($busy) {
-    Write-Host "Порт 8000 уже занят. Этот запуск не стартует, иначе интерфейс попадёт в старый процесс."
-    Write-Host "Если это контейнер: docker stop newbad-demo"
+function Test-PortOpen {
+    param([int]$Port)
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $client.Connect("127.0.0.1", $Port)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        $client.Dispose()
+    }
+}
+
+function Test-OurServer {
+    param($Info, [int]$Port)
+    if (-not $Info) { return $false }
+    $name = [string]$Info.Name
+    $command = [string]$Info.CommandLine
+    if ($Port -eq 8000 -and $name -match 'python' -and $command -match 'uvicorn' -and $command -match 'app\.main:app') {
+        return $true
+    }
+    if ($Port -eq 5173 -and $name -match 'node' -and $command -match 'vite') {
+        return $true
+    }
+    return $false
+}
+
+function Test-DockerProxy {
+    param($Info)
+    if (-not $Info) { return $false }
+    return [string]$Info.Name -match 'docker|wslrelay'
+}
+
+function Stop-NewBad {
+    $stopped = $false
+    $foreign = @()
+    $docker = $false
+    foreach ($port in @(8000, 5173)) {
+        foreach ($procId in (Get-ListeningPids $port)) {
+            $info = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue
+            if (Test-OurServer $info $port) {
+                & taskkill.exe /PID $procId /T /F | Out-Null
+                Write-Host "Остановлен порт $port."
+                $stopped = $true
+            } elseif (Test-DockerProxy $info) {
+                $docker = $true
+            } else {
+                $label = if ($info -and $info.Name) { [string]$info.Name } else { "pid $procId" }
+                $foreign += "$label, порт $port"
+            }
+        }
+    }
+    if ($docker) {
+        $container = ""
+        try {
+            $container = (& docker ps --filter "name=newbad-demo" --format "{{.Names}}" 2>$null | Out-String).Trim()
+        } catch {
+            $container = ""
+        }
+        if ($container -match 'newbad-demo') {
+            & docker stop newbad-demo | Out-Null
+            Write-Host "Контейнер newbad-demo остановлен."
+            $stopped = $true
+        } else {
+            $foreign += "Docker, порт 8000"
+        }
+    }
+    foreach ($item in $foreign) {
+        Write-Host "Этот процесс скрипт не останавливает: $item"
+    }
+    if (-not $stopped -and $foreign.Count -eq 0) {
+        Write-Host "Серверы NewBad не запущены."
+    }
+    return ($foreign.Count -eq 0)
+}
+
+function Wait-PortsFree {
+    $deadline = (Get-Date).AddSeconds(8)
+    do {
+        $busy = (Get-ListeningPids 8000).Count -gt 0 -or (Get-ListeningPids 5173).Count -gt 0
+        if (-not $busy) { return $true }
+        Start-Sleep -Milliseconds 400
+    } while ((Get-Date) -lt $deadline)
+    return $false
+}
+
+function Show-Banner {
+    Write-Host ""
+    Write-Host "Ручная проверка NewBad"
+    Write-Host "Интерфейс: http://127.0.0.1:5173"
+    Write-Host "API:       http://127.0.0.1:8000/docs"
+    Write-Host "Режим берётся из .env."
+    Write-Host "Остановка: пункт 2 в этом файле или Ctrl+C в окне запуска."
+    Write-Host ""
+    Write-Host "В сервисе: войти компанией, открыть карточку, проверить источник и задать вопрос."
+    Write-Host "Для компаний кейса в .env нужно PROFILE_SOURCE=case."
+    Write-Host "Своя новость: блок «Разобрать свою новость»."
+    Write-Host "Режим модели: «Настройки разработки» на главной или на входе."
+    Write-Host ""
+}
+
+function Start-NewBad {
+    if ((Test-PortOpen 8000) -or (Test-PortOpen 5173)) {
+        Write-Host "Порт 8000 или 5173 уже занят. Запуск пропущен, чтобы не попасть в старый процесс."
+        Write-Host "Выберите пункт 3, если это сервер NewBad и его нужно перезапустить."
+        Write-Host ""
+        Read-Host "Нажмите Enter"
+        exit 1
+    }
+    Start-Process "http://127.0.0.1:5173/"
+    & (Join-Path $PSScriptRoot "dev.ps1")
     Write-Host ""
     Read-Host "Нажмите Enter"
-    exit 1
 }
 
-Start-Process "http://127.0.0.1:5173/"
-& (Join-Path $PSScriptRoot "dev.ps1")
-Write-Host ""
-Read-Host "Нажмите Enter"
+function Read-Action {
+    while ($true) {
+        Write-Host "1 — запустить"
+        Write-Host "2 — остановить"
+        Write-Host "3 — перезапустить"
+        Write-Host "0 — выход"
+        $choice = (Read-Host "Выбор").Trim().ToLowerInvariant()
+        switch ($choice) {
+            "1" { return "start" }
+            "2" { return "stop" }
+            "3" { return "restart" }
+            "0" { return "exit" }
+            "start" { return "start" }
+            "stop" { return "stop" }
+            "restart" { return "restart" }
+            default { Write-Host "Нужна цифра 1, 2, 3 или 0." }
+        }
+    }
+}
+
+Show-Banner
+if ([string]::IsNullOrWhiteSpace($Action)) {
+    $Action = Read-Action
+} else {
+    $Action = $Action.Trim().ToLowerInvariant()
+}
+
+switch ($Action) {
+    "start" { Start-NewBad }
+    "stop" {
+        $clear = Stop-NewBad
+        Write-Host ""
+        Read-Host "Нажмите Enter"
+        if (-not $clear) { exit 1 }
+    }
+    "restart" {
+        $clear = Stop-NewBad
+        if (-not $clear) {
+            Write-Host "Перезапуск остановлен: порт держит другой процесс."
+            Write-Host ""
+            Read-Host "Нажмите Enter"
+            exit 1
+        }
+        if (-not (Wait-PortsFree)) {
+            Write-Host "Порты ещё заняты. Повторите остановку."
+            Write-Host ""
+            Read-Host "Нажмите Enter"
+            exit 1
+        }
+        Write-Host "Запускаем снова."
+        Start-NewBad
+    }
+    "exit" { exit 0 }
+    default {
+        Write-Host "Неизвестная команда. Используйте start, stop или restart."
+        Write-Host ""
+        Read-Host "Нажмите Enter"
+        exit 1
+    }
+}

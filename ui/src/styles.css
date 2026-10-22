@@ -347,17 +347,25 @@ dd {
   border-radius: 12px;
 }
 
-.chat form,
 .paste {
   display: grid;
   gap: 0.5rem;
 }
 
-.chat form,
 .quick {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
+}
+
+.chat form {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.chat form input {
+  flex: 1;
 }
 
 .quick button,
@@ -368,6 +376,40 @@ dd {
   color: #fff;
   border-radius: 10px;
   padding: 0.45rem 0.7rem;
+  cursor: pointer;
+}
+
+.quick button.chip {
+  background: #fff;
+  color: #1a1a1a;
+  border: 1px solid #e4d7d4;
+}
+
+.hint {
+  margin: 0 0 0.7rem;
+  color: #555;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  margin: 0 0 0.4rem;
+  color: #555;
+}
+
+.caveat {
+  margin-top: 0.8rem;
+  padding: 0.7rem 0.8rem;
+  background: #faf8f4;
+  border-radius: 12px;
+}
+
+.caveat p {
+  margin: 0.25rem 0;
+}
+
+.caveat summary {
   cursor: pointer;
 }
 
@@ -392,11 +434,124 @@ dd {
 }
 
 .messages li {
-  padding: 0.35rem 0;
+  margin: 0.45rem 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: 12px;
+}
+
+.messages .who {
+  display: block;
+  margin-bottom: 0.15rem;
+  color: #777;
+  font-size: 0.75rem;
 }
 
 .messages .user {
+  margin-left: 2rem;
+  background: #f4f1ea;
+}
+
+.messages .service {
+  margin-right: 2rem;
+  background: #f3f6ff;
+}
+
+.bank-main.narrow {
+  max-width: 40rem;
+}
+
+.session-line {
+  margin-top: 0;
+  color: #444;
+}
+
+.accounts {
+  list-style: none;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.accounts button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: #fff;
+  border: 0;
+  border-radius: 16px;
+  padding: 1rem 1.1rem;
+  cursor: pointer;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 6%);
+}
+
+.accounts strong,
+.accounts span {
+  display: block;
+}
+
+.accounts span {
   color: #666;
+  margin-top: 0.2rem;
+}
+
+.dev-link {
+  display: inline-block;
+  margin-top: 1.2rem;
+  background: transparent;
+  border: 0;
+  color: #777;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.settings-form {
+  display: grid;
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+}
+
+.settings-form label {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.settings-form select,
+.settings-form button {
+  font: inherit;
+}
+
+.settings-form select {
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 0.5rem 0.6rem;
+}
+
+.settings-form .check {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.settings-form button {
+  justify-self: start;
+  border: 0;
+  background: #ef3124;
+  color: #fff;
+  border-radius: 10px;
+  padding: 0.5rem 0.8rem;
+  cursor: pointer;
+}
+
+details.paste summary {
+  cursor: pointer;
+  font-weight: 650;
+  margin-bottom: 0.6rem;
+}
+
+details.paste {
+  margin-top: 1rem;
 }
 
 @media (max-width: 800px) {
