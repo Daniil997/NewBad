@@ -1,24 +1,26 @@
 import json
 import re
+from contextvars import ContextVar
 
 import yaml
 
 from app.agent.loop_context import AgentContext
 from app.corpus.search import NewsItem
 from app.db import ROOT
-from app.llm.client import LLMError, complete, parse_json
-from app.llm.router import current_route
+from app.llm.client import LLMError, parse_json
+from app.llm.router import Route, complete_tier, token_limit
 
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 _FACT = "confirmed_fact"
 _BANK = "bank_position"
 _INFERENCE = "model_inference"
 _COPY_FIELDS = ("why", "risk", "opportunity", "next_step", "question")
+_ANSWER_MODE: ContextVar[str] = ContextVar("answer_mode", default="mock")
 
 
 def extract_fact(news: NewsItem) -> str | None:
     packet = [_news_evidence(news)]
-    payload = _ask(
+    payload, _route, _tokens = _ask(
         _messages(
             (
                 "Извлеки один короткий факт. Верни JSON с полями text, layer и evidence_ids. "
@@ -27,19 +29,19 @@ def extract_fact(news: NewsItem) -> str | None:
             ),
             {"evidence": packet},
         ),
-        180,
+        token_limit("fact"),
     )
     claim = None if payload is None else _claim(payload, _index(packet), _FACT)
     return None if claim is None else claim["text"]
 
 
 def request_copy(ctx: AgentContext) -> dict | None:
-    route = current_route()
-    if route.provider != "local" or ctx.profile is None or ctx.news is None:
+    _mark(ctx, "template", None, 0)
+    if ctx.profile is None or ctx.news is None:
         return None
     packet = evidence_packet(ctx)
     allowed = _index(packet)
-    payload = _ask(
+    payload, route, tokens = _ask(
         _messages(
             (
                 "Собери карточку по списку evidence. Верни JSON с ключами fact, bank и inference. "
@@ -52,7 +54,7 @@ def request_copy(ctx: AgentContext) -> dict | None:
             ),
             {"evidence": packet, "issues": ctx.issues},
         ),
-        400,
+        token_limit("copy"),
     )
     if payload is None or any(key not in payload for key in ("fact", "bank", "inference")):
         return None
@@ -81,6 +83,7 @@ def request_copy(ctx: AgentContext) -> dict | None:
         if not text or not _grounded(text, corpus):
             return None
         fields[key] = text
+    _mark(ctx, _origin(route), route, tokens)
     return {**fields, "fact": fact, "bank": bank, "inference": {"layer": _INFERENCE, "evidence_ids": ids, **fields}}
 
 
@@ -88,7 +91,7 @@ def answer_with_model(question: str, card_text: str, evidence: list[dict] | None
     packet = evidence if evidence is not None else [
         {"evidence_id": "card", "source": "card", "layer": _FACT, "title": "Карточка", "text": card_text}
     ]
-    payload = _ask(
+    payload, route, _tokens = _ask(
         _messages(
             (
                 "Ответь на вопрос только по evidence. Верни JSON {\"answer\": \"...\", \"evidence_ids\": [...]}. "
@@ -97,7 +100,7 @@ def answer_with_model(question: str, card_text: str, evidence: list[dict] | None
             ),
             {"question": question, "evidence": packet},
         ),
-        250,
+        token_limit("answer"),
     )
     if payload is None:
         return None
@@ -111,7 +114,12 @@ def answer_with_model(question: str, card_text: str, evidence: list[dict] | None
         return None
     if not _grounded(answer, corpus or card_text):
         return None
+    _ANSWER_MODE.set("replay" if _origin(route) == "replay" else route.mode)
     return answer
+
+
+def answered_mode() -> str:
+    return _ANSWER_MODE.get()
 
 
 def evidence_packet(ctx: AgentContext) -> list[dict]:
@@ -152,15 +160,36 @@ def _news_evidence(news: NewsItem, text: str | None = None) -> dict:
     }
 
 
-def _ask(messages: list[dict[str, str]], max_tokens: int) -> dict | None:
-    route = current_route()
-    if route.provider != "local":
-        return None
+def _ask(messages: list[dict[str, str]], max_tokens: int) -> tuple[dict | None, Route, int]:
+    outcome = complete_tier(messages, tier="heavy", max_tokens=max_tokens)
+    if not outcome.text:
+        return None, outcome.route, 0
     try:
-        result = complete(messages, model=route.model, mode=route.mode, max_tokens=max_tokens)
-        return parse_json(result.text)
+        return parse_json(outcome.text), outcome.route, outcome.tokens
     except LLMError:
-        return None
+        return None, outcome.route, 0
+
+
+def _origin(route: Route) -> str:
+    if route.mode == "replay" or route.provider == "replay":
+        return "replay"
+    if route.provider in {"local", "cloud"}:
+        return "model"
+    return "template"
+
+
+def _mark(ctx: AgentContext, origin: str, route: Route | None, tokens: int) -> None:
+    ctx.generation_origin = origin
+    if route is None or origin == "template":
+        ctx.generation_mode = ""
+        ctx.generation_provider = ""
+        ctx.generation_model = ""
+        ctx.generation_tokens = 0
+        return
+    ctx.generation_mode = route.mode
+    ctx.generation_provider = route.provider
+    ctx.generation_model = route.model
+    ctx.generation_tokens = tokens
 
 
 def _messages(instruction: str, payload: dict) -> list[dict[str, str]]:

@@ -4,11 +4,15 @@ import re
 import time
 
 import httpx
+import yaml
 
+from app.db import ROOT
 from app.llm.placement import request_options
-from app.llm.registry import require_allowed
+from app.llm.registry import api_model, require_allowed
 from app.tracing.journal import log_llm_call
 
+_CLOUD_MODES = frozenset({"cloud_only", "hybrid"})
+_PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 
 
@@ -25,41 +29,77 @@ class Completion:
         self.mode = mode
 
 
-def post_chat(url: str, payload: dict, timeout: float) -> dict:
-    with httpx.Client(timeout=timeout) as client:
-        response = client.post(url, json=payload)
+def post_chat(
+    url: str,
+    payload: dict,
+    timeout: float,
+    headers: dict[str, str] | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> dict:
+    with httpx.Client(timeout=timeout, transport=transport) as client:
+        response = client.post(url, json=payload, headers=headers)
         response.raise_for_status()
         return response.json()
 
 
-def complete(messages: list[dict[str, str]], *, model: str, mode: str, max_tokens: int) -> Completion:
-    require_allowed(model)
-    if model == "mock-model":
-        raise LLMError("заглушка не ходит в сеть")
-    base = os.environ.get("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8080/v1").rstrip("/")
-    url = f"{base}/chat/completions"
+def complete(
+    messages: list[dict[str, str]],
+    *,
+    model: str,
+    mode: str,
+    max_tokens: int,
+    provider: str | None = None,
+) -> Completion:
+    chosen = _provider(mode, provider)
+    if mode == "replay":
+        raise LLMError("replay не ходит в сеть")
+    if chosen == "cloud":
+        try:
+            model = api_model(model)
+        except ValueError:
+            raise LLMError("модель не разрешена для облачного сервиса") from None
+        _require_cloud(mode)
+        base = _cloud_base()
+        headers = {"Authorization": f"Bearer {_cloud_key()}"}
+        options = None
+        reason = "облачный вызов"
+    else:
+        require_allowed(model)
+        if model == "mock-model" or mode == "mock":
+            raise LLMError("заглушка не ходит в сеть")
+        base = _local_base()
+        headers = None
+        options = request_options()
+        reason = "локальный вызов"
     payload = {
         "model": model,
         "messages": messages,
         "temperature": 0.2,
-        "max_tokens": max_tokens,
+        "max_tokens": min(max_tokens, _token_cap()),
     }
-    options = request_options()
-    if options:
-        payload["options"] = options
-    options = request_options()
     if options:
         payload["options"] = options
     started = time.perf_counter()
     try:
-        body = post_chat(url, payload, timeout=_timeout())
+        body = post_chat(f"{base}/chat/completions", payload, _timeout(chosen, options), headers)
+    except httpx.TimeoutException:
+        raise LLMError("истекло время ожидания модели") from None
+    except httpx.HTTPStatusError as exc:
+        raise LLMError(_status_message(exc.response.status_code, chosen)) from None
+    except httpx.HTTPError:
+        raise LLMError("сервер модели недоступен") from None
+    except json.JSONDecodeError:
+        raise LLMError("модель вернула некорректный ответ") from None
+    try:
         text = body["choices"][0]["message"]["content"]
         tokens = int((body.get("usage") or {}).get("total_tokens") or 0)
-    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
-        raise LLMError("сервер модели недоступен") from exc
+    except (KeyError, IndexError, TypeError, ValueError):
+        raise LLMError("модель вернула некорректный ответ") from None
+    if not isinstance(text, str) or not text.strip():
+        raise LLMError("модель вернула некорректный ответ")
     latency_ms = int((time.perf_counter() - started) * 1000)
-    log_llm_call(model, "local", mode, tokens=tokens, latency_ms=latency_ms, switch_reason="локальный вызов")
-    return Completion(text=str(text), tokens=tokens, model=model, provider="local", mode=mode)
+    log_llm_call(model, chosen, mode, tokens=tokens, latency_ms=latency_ms, switch_reason=reason)
+    return Completion(text=text, tokens=tokens, model=model, provider=chosen, mode=mode)
 
 
 def parse_json(text: str) -> dict:
@@ -74,7 +114,7 @@ def parse_json(text: str) -> dict:
 
 
 def server_reachable() -> bool:
-    base = os.environ.get("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8080/v1").rstrip("/")
+    base = _local_base()
     root = base.removesuffix("/v1")
     if _status_ok(f"{root}/health"):
         return True
@@ -83,21 +123,98 @@ def server_reachable() -> bool:
     return False
 
 
+def _provider(mode: str, provider: str | None) -> str:
+    if provider in {"local", "cloud"}:
+        return provider
+    if mode == "cloud_only":
+        return "cloud"
+    return "local"
+
+
+def _require_cloud(mode: str) -> None:
+    if os.environ.get("ALLOW_CLOUD", "false").lower() != "true":
+        raise LLMError("облако выключено")
+    if mode not in _CLOUD_MODES:
+        raise LLMError("облачный вызов разрешён только в облачном режиме")
+
+
+def _cloud_base() -> str:
+    expanded = _provider_value("cloud", "base_url")
+    explicit = os.environ.get("CASE_LLM_BASE_URL", "").strip()
+    base = explicit or expanded
+    if not base:
+        raise LLMError("не задан адрес облачного сервиса")
+    return base.rstrip("/")
+
+
+def _cloud_key() -> str:
+    key = os.environ.get("CASE_LLM_API_KEY", "").strip()
+    if not key:
+        raise LLMError("не задан ключ облачного сервиса")
+    return key
+
+
+def _local_base() -> str:
+    explicit = os.environ.get("LOCAL_LLM_BASE_URL", "").strip()
+    base = explicit or _provider_value("local", "base_url") or "http://127.0.0.1:8080/v1"
+    return base.rstrip("/")
+
+
+def _provider_value(name: str, field: str) -> str:
+    loaded = yaml.safe_load((ROOT / "config" / "llm.yaml").read_text(encoding="utf-8")) or {}
+    spec = (loaded.get("providers") or {}).get(name) or {}
+    return _expand(spec.get(field, ""))
+
+
+def _expand(value: object) -> str:
+    def repl(match: re.Match[str]) -> str:
+        current = os.environ.get(match.group(1))
+        if current is None or not current.strip():
+            return match.group(2) or ""
+        return current
+
+    return _PLACEHOLDER.sub(repl, str(value or "")).strip()
+
+
+def _token_cap() -> int:
+    table = (_config_limits().get("max_tokens") or {})
+    values = [int(item) for item in table.values()]
+    return max(values) if values else 400
+
+
+def _config_limits() -> dict:
+    loaded = yaml.safe_load((ROOT / "config" / "llm.yaml").read_text(encoding="utf-8")) or {}
+    limits = loaded.get("limits") or {}
+    return limits if isinstance(limits, dict) else {}
+
+
+def _timeout(provider: str, options: dict | None) -> float:
+    raw = os.environ.get("LLM_TIMEOUT_S")
+    if raw is None:
+        limit = float(_config_limits().get("timeout_s", 90))
+    else:
+        try:
+            limit = float(raw)
+        except ValueError:
+            limit = 90.0
+    if provider == "local" and options is not None and "num_gpu" not in options:
+        return max(limit, 600.0)
+    return limit
+
+
+def _status_message(code: int, provider: str) -> str:
+    if code in {401, 403}:
+        if provider == "cloud":
+            return "облачный сервис отклонил доступ"
+        return "сервер модели отклонил доступ"
+    if code in {402, 429}:
+        return "превышен лимит запросов или бюджет"
+    return "сервер модели недоступен"
+
+
 def _status_ok(url: str) -> bool:
     try:
         response = httpx.get(url, timeout=0.4)
     except httpx.HTTPError:
         return False
     return response.status_code == 200
-
-
-def _timeout() -> float:
-    raw = os.environ.get("LLM_TIMEOUT_S", "90")
-    try:
-        limit = float(raw)
-    except ValueError:
-        limit = 90.0
-    options = request_options()
-    if options is not None and "num_gpu" not in options:
-        return max(limit, 600.0)
-    return limit

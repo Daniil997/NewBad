@@ -1,7 +1,7 @@
-# Local env at repo root (if used)
-.env
-.env.local
-!.env.example
+# Local environment files and secrets. Keep only the safe template in Git.
+/.env
+/.env.*
+!/.env.example
 
 .DS_Store
 Thumbs.db

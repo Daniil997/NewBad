@@ -70,6 +70,14 @@ def init_db() -> None:
                 detail TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS llm_replay (
+                prompt_hash TEXT PRIMARY KEY,
+                model TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                response TEXT NOT NULL,
+                tokens INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS pasted_news (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,

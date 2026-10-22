@@ -11,7 +11,7 @@ providers:
     cloud: false
   cloud:
     type: openai_compat
-    base_url: '${CASE_LLM_BASE_URL:-}'
+    base_url: '${CASE_LLM_BASE_URL:-https://changellenge.up.railway.app/v1}'
     api_key: '${CASE_LLM_API_KEY:-}'
     cloud: true
   mock:
@@ -19,13 +19,37 @@ providers:
     cloud: false
 
 limits:
+  # Потолок провайдера на весь командный ключ. Сброс в 03:00 по Москве.
+  provider_daily_limit_rub: 500
+  budget_reset: "03:00"
+  budget_reset_tz: Europe/Moscow
+  # Внутренний предохранитель ниже потолка провайдера.
   daily_budget_rub: 400
-  rub_per_1k_tokens: 0.0   # заполнить по письму с ключом
+  # В инструкции нет цены за токен. Не подставлять оценку.
+  rub_per_1k_tokens: 0.0
   max_retries: 2
   timeout_s: 90
+  max_tokens:
+    plan: 120
+    fact: 180
+    copy: 400
+    answer: 250
 
-# Имена моделей должны входить в список приложения 3 (app/llm/registry.py).
-# Для облачного провайдера использовать имена из письма организаторов.
+# Точные идентификаторы из инструкции API. Локальные имена для этого адреса не отправляются.
+models:
+  api:
+    - google/gemma-4-26b-a4b-it
+    - z-ai/glm-5.3-flash
+    - qwen/qwen3.6-35b-a3b
+    - deepseek/deepseek-v4.1-flash
+    - qwen/qwen3-vl-30b-a3b-instruct
+    - moonshotai/kimi-k2.6
+  local:
+    gemma-4-26b-a4b: google/gemma-4-26b-a4b-it
+    qwen3.6-35b-a3b: qwen/qwen3.6-35b-a3b
+
+# Имена моделей должны входить в models.api или в локальные псевдонимы.
+# Для облачного провайдера в запрос уходит только точный ID из инструкции.
 modes:
   mock:
     tiers:
@@ -44,17 +68,17 @@ modes:
     tiers:
       light: [{provider: local, model: gemma-4-26b-a4b}]
       heavy:
-        - {provider: cloud, model: qwen3.6-35b-a3b}
+        - {provider: cloud, model: qwen/qwen3.6-35b-a3b}
         - {provider: local, model: gemma-4-26b-a4b}
   cloud_only:
     allow_cloud: true
     tiers:
-      light: [{provider: cloud, model: gemma-4-26b-a4b}]
-      heavy: [{provider: cloud, model: qwen3.6-35b-a3b}]
+      light: [{provider: cloud, model: google/gemma-4-26b-a4b-it}]
+      heavy: [{provider: cloud, model: qwen/qwen3.6-35b-a3b}]
   replay:
     cache_only: true
     tiers:
       light: [{provider: local, model: gemma-4-26b-a4b}]
       heavy:
-        - {provider: cloud, model: qwen3.6-35b-a3b}
+        - {provider: cloud, model: qwen/qwen3.6-35b-a3b}
         - {provider: local, model: gemma-4-26b-a4b}

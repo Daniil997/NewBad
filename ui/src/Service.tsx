@@ -54,7 +54,7 @@ type InsightCard = {
   features_triggered: string[];
   missing_data: string[];
   assumptions: string[];
-  llm_trace: { mode: string; retries: number; model: string };
+  llm_trace: { mode: string; retries: number; model: string; origin?: string };
 };
 
 const ROLE_LABEL: Record<string, string> = {
@@ -62,6 +62,12 @@ const ROLE_LABEL: Record<string, string> = {
   saver: "вкладчик",
   both: "и кредит, и депозит",
   neither: "без кредита и депозита",
+};
+
+const ORIGIN_LABEL: Record<string, string> = {
+  model: "ответ модели",
+  replay: "повтор из кэша",
+  template: "шаблон",
 };
 
 const LAYER_LABEL: Record<string, string> = {
@@ -277,7 +283,8 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
               <>
                 <CardBody card={card} />
                 <p className="meta">
-                  режим {card.llm_trace.mode}, повторов проверки {card.llm_trace.retries}
+                  {ORIGIN_LABEL[card.llm_trace.origin ?? "template"] ?? "шаблон"}, режим {card.llm_trace.mode},
+                  повторов проверки {card.llm_trace.retries}
                 </p>
                 {newsSource?.url ? (
                   <a className="source-link" href={newsSource.url} target="_blank" rel="noreferrer">

@@ -117,6 +117,7 @@ class LlmTrace(BaseModel):
     model: str = Field(min_length=1)
     provider: str = Field(min_length=1)
     mode: str = Field(min_length=1)
+    origin: Literal["model", "template", "replay"] = "template"
     tokens: int = Field(default=0, ge=0)
     retries: int = Field(default=0, ge=0)
     latency_ms: int = Field(default=0, ge=0)

@@ -21,8 +21,8 @@ def test_local_mode_extracts_and_drafts_pasted_news(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     seen: list[str] = []
 
-    def fake_post(_url: str, payload: dict, timeout: float) -> dict:
-        del timeout
+    def fake_post(_url: str, payload: dict, timeout: float, headers: dict | None = None) -> dict:
+        del timeout, headers
         system = payload["messages"][0]["content"]
         user = json.loads(payload["messages"][1]["content"])
         seen.append(system)
@@ -82,6 +82,9 @@ def test_local_mode_extracts_and_drafts_pasted_news(monkeypatch, tmp_path):
     assert why == "Компания пользуется кредитом, поэтому ставка держит стоимость заёмных денег."
     assert card["llm_trace"]["mode"] == "local_only"
     assert card["llm_trace"]["model"] == "gemma-4-26b-a4b"
+    assert card["llm_trace"]["origin"] == "model"
+    assert card["llm_trace"]["origin"] == "model"
+    assert card["llm_trace"]["origin"] == "model"
     assert card["bank_view"]["quote"]
     assert any("факт" in item for item in seen)
     assert any("tools" in item for item in seen)
@@ -92,8 +95,8 @@ def test_local_mode_falls_back_when_server_is_down(monkeypatch, tmp_path):
     monkeypatch.setenv("ALLOW_CLOUD", "false")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
-    def down(_url: str, _payload: dict, timeout: float) -> dict:
-        del timeout
+    def down(_url: str, _payload: dict, timeout: float, headers: dict | None = None) -> dict:
+        del timeout, headers
         raise httpx.ConnectError("нет сервера")
 
     monkeypatch.setattr("app.llm.client.post_chat", down)
@@ -102,6 +105,8 @@ def test_local_mode_falls_back_when_server_is_down(monkeypatch, tmp_path):
     assert response.status_code == 200
     card = response.json()
     assert card["llm_trace"]["mode"] == "mock"
+    assert card["llm_trace"]["origin"] == "template"
+    assert card["llm_trace"]["origin"] == "template"
     assert "стоимость заёмных денег" in " ".join(item["text"] for item in card["why_for_company"]["claims"])
 
 

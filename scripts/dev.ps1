@@ -3,11 +3,34 @@
 #   .\scripts\dev.ps1
 
 $ErrorActionPreference = "Stop"
+
+function Import-DotEnv {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    foreach ($line in [System.IO.File]::ReadAllLines($Path)) {
+        $trimmed = $line.Trim()
+        if ($trimmed.Length -eq 0 -or $trimmed.StartsWith("#")) { continue }
+        $eq = $trimmed.IndexOf("=")
+        if ($eq -lt 1) { continue }
+        $name = $trimmed.Substring(0, $eq).Trim()
+        $value = $trimmed.Substring($eq + 1).Trim()
+        if ($value.Length -ge 2) {
+            $quote = $value.Substring(0, 1)
+            if (($quote -eq '"' -or $quote -eq "'") -and $value.EndsWith($quote)) {
+                $value = $value.Substring(1, $value.Length - 2)
+            }
+        }
+        if ($name -match '^[A-Za-z_][A-Za-z0-9_]*$') {
+            Set-Item -Path "Env:$name" -Value $value
+        }
+    }
+}
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 try { [Console]::OutputEncoding = $OutputEncoding } catch { }
 
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
+Import-DotEnv (Join-Path $Root ".env")
 
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
 if (-not (Test-Path $Python)) {

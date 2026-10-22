@@ -49,6 +49,8 @@ def test_rate_cards_differ_for_borrower_and_saver(monkeypatch, tmp_path):
         assert card["bank_view"]["quote"] in passport["text"]
         assert card["llm_trace"]["mode"] == "mock"
         assert card["llm_trace"]["provider"] == "mock"
+        assert card["llm_trace"]["origin"] == "template"
+        assert card["llm_trace"]["origin"] == "template"
 
     with connect() as connection:
         tools = {row["tool"] for row in connection.execute("SELECT tool FROM tool_calls")}

@@ -47,6 +47,11 @@ class AgentContext:
     planned_tools: list[str] = field(default_factory=list)
     matched: list[str] = field(default_factory=list)
     plan: PlanChoice | None = None
+    generation_origin: str = "template"
+    generation_mode: str = ""
+    generation_provider: str = ""
+    generation_model: str = ""
+    generation_tokens: int = 0
     retries: int = 0
     issues: list[str] = field(default_factory=list)
     extracted_fact: str | None = None

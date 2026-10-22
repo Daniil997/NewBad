@@ -154,13 +154,7 @@ def assemble(ctx: AgentContext, copy: dict[str, str] | None = None) -> Card:
         client_id=profile.client_id,
         event_id=news.id,
         generated_at=datetime.now(timezone.utc).isoformat(),
-        llm_trace=LlmTrace(
-            model=ctx.plan.model,
-            provider=ctx.plan.provider,
-            mode=ctx.plan.mode,
-            tokens=ctx.plan.tokens,
-            retries=ctx.retries,
-        ),
+        llm_trace=_trace(ctx),
         what_happened=WhatHappened(claims=claims, assumptions=assumptions),
         bank_position=bank_claims,
         why_for_company=WhyForCompany(claims=[why]),
@@ -184,10 +178,49 @@ def assemble(ctx: AgentContext, copy: dict[str, str] | None = None) -> Card:
     )
 
 
+def _trace(ctx: AgentContext) -> LlmTrace:
+    if ctx.generation_origin == "model" and ctx.generation_model:
+        return LlmTrace(
+            model=ctx.generation_model,
+            provider=ctx.generation_provider,
+            mode=ctx.generation_mode,
+            origin="model",
+            tokens=ctx.generation_tokens,
+            retries=ctx.retries,
+        )
+    if ctx.generation_origin == "replay" and ctx.generation_model:
+        return LlmTrace(
+            model=ctx.generation_model,
+            provider=ctx.generation_provider,
+            mode="replay",
+            origin="replay",
+            tokens=ctx.generation_tokens,
+            retries=ctx.retries,
+        )
+    if ctx.plan is not None and ctx.plan.provider == "mock":
+        return LlmTrace(
+            model=ctx.plan.model,
+            provider="mock",
+            mode="mock",
+            origin="template",
+            tokens=ctx.plan.tokens,
+            retries=ctx.retries,
+        )
+    if ctx.plan is not None and ctx.plan.mode == "replay":
+        return LlmTrace(
+            model=ctx.plan.model or "replay",
+            provider="replay",
+            mode="replay",
+            origin="template",
+            retries=ctx.retries,
+        )
+    return LlmTrace(model="template", provider="template", mode="template", origin="template", retries=ctx.retries)
+
+
 def draft_card(ctx: AgentContext) -> Card:
     from app.agent.generate import request_copy
 
-    copy = request_copy(ctx) if ctx.plan is not None and ctx.plan.provider == "local" else None
+    copy = request_copy(ctx) if ctx.plan is not None and ctx.plan.provider != "mock" else None
     return assemble(ctx, copy)
 
 

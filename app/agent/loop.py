@@ -96,8 +96,9 @@ def _gather(ctx: AgentContext) -> None:
             _invoke(ctx, name, {"client_id": ctx.client_id})
             fresh = get_profile(ctx.client_id)
             ctx.remember_counterparties([] if fresh is None else list(fresh.counterparties))
-    if ctx.news is not None and ctx.news.id.startswith("pasted-") and ctx.plan is not None and ctx.plan.provider == "local":
-        ctx.extracted_fact = extract_fact(ctx.news)
+    if ctx.news is not None and ctx.news.id.startswith("pasted-") and ctx.plan is not None:
+        if ctx.plan.provider in {"local", "cloud"}:
+            ctx.extracted_fact = extract_fact(ctx.news)
     log_step(ctx.client_id, ctx.event_id, "GATHER", {"reports": _public_reports(ctx.tool_reports)})
 
 

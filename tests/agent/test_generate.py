@@ -1,10 +1,10 @@
 import json
 
+from app.agent.draft import draft_card
 from app.agent.generate import answer_with_model, evidence_packet, extract_fact, request_copy
 from app.agent.loop_context import AgentContext
 from app.agent.tools import find_bank, find_news
-from app.llm.client import Completion
-from app.llm.router import Route
+from app.llm.router import PlanChoice, Route, TierResult
 from app.profile.build import get_profile
 
 _ROUTE = Route(mode="local_only", provider="local", model="gemma-4-26b-a4b")
@@ -26,16 +26,17 @@ def _context() -> AgentContext:
     )
 
 
-def _install(monkeypatch, reply):
+def _install(monkeypatch, reply, route: Route | None = None):
+    chosen = route or _ROUTE
     sent: list[dict] = []
 
-    def complete(messages, **_kwargs):
+    def fake(messages, *, tier, max_tokens):
+        del tier, max_tokens
         sent.append(json.loads(messages[1]["content"]))
         text = reply if isinstance(reply, str) else json.dumps(reply, ensure_ascii=False)
-        return Completion(text=text, tokens=1, model=_ROUTE.model, provider="local", mode=_ROUTE.mode)
+        return TierResult(route=chosen, text=text, tokens=1)
 
-    monkeypatch.setattr("app.agent.generate.current_route", lambda: _ROUTE)
-    monkeypatch.setattr("app.agent.generate.complete", complete)
+    monkeypatch.setattr("app.agent.generate.complete_tier", fake)
     return sent
 
 
@@ -146,10 +147,64 @@ def test_answer_rejects_an_unknown_source_and_broken_json(monkeypatch):
     assert answer_with_model("какая ставка", "Ключевая ставка 14%.", evidence) is None
 
 
-def test_mock_provider_does_not_call_the_model(monkeypatch):
-    def fail(*_args, **_kwargs):
+def test_mock_provider_does_not_call_the_model(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LLM_MODE", "mock")
+
+    def explode(*_args, **_kwargs):
         raise AssertionError("модель не должна вызываться")
 
-    monkeypatch.setattr("app.agent.generate.complete", fail)
-    assert request_copy(_context()) is None
+    monkeypatch.setattr("app.llm.router.complete", explode)
+    monkeypatch.setattr("app.llm.client.post_chat", explode)
+    ctx = _context()
+    assert request_copy(ctx) is None
+    assert ctx.generation_origin == "template"
     assert extract_fact(find_news("cbr-rate-14")) is None
+
+
+def test_cloud_copy_uses_the_heavy_route(monkeypatch):
+    route = Route(
+        mode="cloud_only",
+        provider="cloud",
+        model="google/gemma-4-26b-a4b-it",
+        reason="тест",
+    )
+    seen: dict[str, object] = {}
+
+    def fake(_messages, *, tier, max_tokens):
+        seen["tier"] = tier
+        seen["max_tokens"] = max_tokens
+        return TierResult(route=route, text=json.dumps(_good_copy(), ensure_ascii=False), tokens=5)
+
+    monkeypatch.setattr("app.agent.generate.complete_tier", fake)
+    ctx = _context()
+    ctx.plan = PlanChoice(
+        tools=["get_profile"],
+        model=route.model,
+        provider="cloud",
+        mode="cloud_only",
+        tokens=1,
+    )
+    card = draft_card(ctx)
+    assert seen == {"tier": "heavy", "max_tokens": 400}
+    assert card.llm_trace.origin == "model"
+    assert card.llm_trace.mode == "cloud_only"
+    assert card.llm_trace.provider == "cloud"
+    assert card.llm_trace.model == "google/gemma-4-26b-a4b-it"
+
+
+def test_failed_model_text_stays_a_template(monkeypatch):
+    _install(monkeypatch, "это не json")
+    ctx = _context()
+    ctx.plan = PlanChoice(
+        tools=["get_profile"],
+        model="gemma-4-26b-a4b",
+        provider="local",
+        mode="local_only",
+        tokens=3,
+    )
+    card = draft_card(ctx)
+    assert card.llm_trace.origin == "template"
+    assert card.llm_trace.mode == "template"
+    assert card.llm_trace.provider == "template"
+    assert "gemma" not in card.llm_trace.model
