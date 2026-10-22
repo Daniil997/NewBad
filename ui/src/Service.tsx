@@ -152,6 +152,7 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
       return;
     }
     const controller = new AbortController();
+    setMessages([]);
     void fetch(`/api/clients/${selected}/events/${eventId}/card`, { method: "POST", signal: controller.signal })
       .then((response) => {
         if (!response.ok) {

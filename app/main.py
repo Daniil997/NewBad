@@ -132,7 +132,7 @@ def event_chat(client_id: str, event_id: str, body: ChatQuestion) -> ChatReply:
     if card is None:
         raise HTTPException(status_code=404, detail="Компания или событие не найдены")
     try:
-        return answer_from_card(card, body.question)
+        return answer_from_card(card, body.question, client_id, event_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

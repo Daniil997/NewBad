@@ -89,6 +89,14 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 source TEXT
             );
+            CREATE TABLE IF NOT EXISTS chat_turns (
+                id INTEGER PRIMARY KEY,
+                client_id TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                text TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
             """
         )
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(pasted_news)")}
