@@ -46,6 +46,8 @@ def build_card(client_id: str, event_id: str) -> Card | None:
         finish = "проверка пройдена"
         if issues:
             finish = "истекло время цикла" if _expired(started) else "достигнут лимит повторов"
+            if "conflict" in issues:
+                ctx.drop_bank("В найденных источниках есть противоречащие выводы; позиция банка скрыта до проверки.")
             card = assemble(ctx)
             card.llm_trace.retries = ctx.retries
             card.missing_data = [

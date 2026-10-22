@@ -1,14 +1,16 @@
 import json
+from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
-from app.db import connect
+from app.db import connect, init_db
 from app.llm.client import Completion, LLMError
 from app.llm.router import choose_tools, complete_tier, resolve_route
 from app.main import app
 
 CLOUD_LIGHT = "google/gemma-4-26b-a4b-it"
-CLOUD_HEAVY = "qwen/qwen3.6-35b-a3b"
+CLOUD_HEAVY = CLOUD_LIGHT
+CLOUD_HYBRID = "qwen/qwen3.6-35b-a3b"
 LOCAL_LIGHT = "gemma-4-26b-a4b"
 
 
@@ -84,6 +86,27 @@ def test_cloud_only_selects_the_configured_model(monkeypatch, tmp_path):
     assert choice.tools == ["search_news"]
 
 
+def test_cloud_stops_after_configured_ruble_budget(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LLM_MODE", "cloud_only")
+    monkeypatch.setenv("ALLOW_CLOUD", "true")
+    monkeypatch.setenv("CASE_LLM_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "app.llm.router.budget_policy",
+        lambda: {"daily_budget_rub": 4, "provider_daily_limit_rub": 500,
+                 "rub_per_1k_tokens": 1.0, "reset": "03:00", "tz": "Europe/Moscow"},
+    )
+    init_db()
+    with connect() as connection:
+        connection.execute(
+            "INSERT INTO llm_calls (model, provider, mode, tokens, latency_ms, created_at) "
+            "VALUES ('m', 'cloud', 'cloud_only', 4000, 1, ?)" ,
+            (datetime.now(timezone.utc).isoformat(),),
+        )
+    assert resolve_route("light").provider == "mock"
+    assert "внутренний дневной бюджет" in resolve_route("light").reason
+
+
 def test_hybrid_falls_back_to_local_after_one_cloud_attempt(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("LLM_MODE", "hybrid")
@@ -103,7 +126,7 @@ def test_hybrid_falls_back_to_local_after_one_cloud_attempt(monkeypatch, tmp_pat
         "app.llm.router._entries",
         lambda _mode, _tier: [
             {"provider": "cloud", "model": CLOUD_LIGHT},
-            {"provider": "cloud", "model": CLOUD_HEAVY},
+            {"provider": "cloud", "model": CLOUD_HYBRID},
             {"provider": "local", "model": LOCAL_LIGHT},
         ],
     )

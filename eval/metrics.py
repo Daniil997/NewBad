@@ -10,6 +10,7 @@ from datetime import date
 
 import yaml
 
+from app.agent.pasted import load_pasted_news
 from app.corpus.search import CorpusError, _page_fragments, load_bank_documents, load_news
 from app.db import ROOT
 from app.llm.router import budget_policy
@@ -39,16 +40,20 @@ def source_supported_share(card: Card) -> float:
     claims = card.all_claims()
     if not claims:
         return 0.0
-    news = {item.id: item for item in load_news()}
+    news = _news_index()
     bank = load_bank_documents()
     supported = sum(1 for claim in claims if _supported(card, claim, news, bank))
     return supported / len(claims)
 
 
 def unsupported_claim_ids(card: Card) -> list[str]:
-    news = {item.id: item for item in load_news()}
+    news = _news_index()
     bank = load_bank_documents()
     return [claim.id for claim in card.all_claims() if not _supported(card, claim, news, bank)]
+
+
+def _news_index() -> dict:
+    return {item.id: item for item in [*load_news(), *load_pasted_news()]}
 
 
 def feed_quality(client_id: str, today: date | None = None) -> dict:

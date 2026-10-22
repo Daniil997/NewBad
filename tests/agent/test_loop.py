@@ -4,7 +4,7 @@ from app.agent.draft import draft_card
 from app.agent.loop import _gather, _plan, build_card
 from app.agent.loop_context import AgentContext
 from app.agent.verify import verify_card
-from app.corpus.search import CorpusError
+from app.corpus.search import BankDocument, CorpusError, NewsItem
 from app.db import connect
 
 
@@ -67,6 +67,51 @@ def test_tool_error_stays_separate_from_an_empty_search(monkeypatch, tmp_path):
     assert bank[0]["status"] == "error"
     assert "Индекс банка не построен" in bank[0]["message"]
     assert any("Индекс банка не построен" in item for item in card.missing_data)
+
+
+def test_persistent_conflicting_sources_are_disclosed_and_bank_claim_is_suppressed(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LLM_MODE", "mock")
+    news = NewsItem(
+        id="conflict-rate-news",
+        url="https://example.test/news",
+        title="Банк России объявил повышение ставки",
+        published_at="2026-10-20",
+        excerpt="Банк России объявил повышение ключевой ставки.",
+        event_type="monetary_policy",
+        event_title="Ключевая ставка",
+    )
+    quote = "Банк ожидает снижения ключевой ставки."
+    bank = BankDocument(
+        doc_id="conflict-rate-bank",
+        title="Прогноз банка",
+        published_at="2026-10-19",
+        topic="key_rate",
+        page=1,
+        source_type="bank_analytics",
+        theses=[quote],
+        text=quote,
+        quote=quote,
+    )
+    monkeypatch.setattr("app.agent.loop.find_news", lambda event_id: news if event_id == news.id else None)
+    monkeypatch.setattr("app.agent.tools.find_news", lambda event_id: news if event_id == news.id else None)
+    monkeypatch.setattr(
+        "app.agent.tools.bank_analytics",
+        lambda *_args, **_kwargs: {
+            "hits": [{"id": bank.doc_id, "page": bank.page, "published_at": bank.published_at,
+                      "title": bank.title, "quote": bank.quote, "source_type": bank.source_type}],
+            "message": "Найден материал с противоположным выводом.",
+        },
+    )
+    monkeypatch.setattr("app.agent.loop.find_bank", lambda doc_id, _page=None: bank if doc_id == bank.doc_id else None)
+
+    card = build_card("U-BORROWER", news.id)
+
+    assert card is not None
+    assert card.verification.status == "passed"
+    assert card.bank_view.status == "none"
+    assert any("противоречащие выводы" in item for item in card.missing_data)
+    assert not any(claim.layer == "bank_position" for claim in card.all_claims())
 
 
 def test_missing_evidence_repeats_a_targeted_search(monkeypatch, tmp_path):

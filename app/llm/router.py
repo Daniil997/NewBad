@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
+from datetime import datetime, time, timedelta, timezone
 
 import yaml
 from pydantic import BaseModel
@@ -196,7 +197,32 @@ def _cloud_block() -> str | None:
         return "облако выключено, ответ собирает заглушка"
     if not os.environ.get("CASE_LLM_API_KEY", "").strip():
         return "не задан ключ облачного сервиса"
+    policy = budget_policy()
+    rate = policy["rub_per_1k_tokens"]
+    if rate > 0:
+        spent = _cloud_spend_since_reset() / 1000 * rate
+        if spent >= policy["daily_budget_rub"]:
+            return "достигнут внутренний дневной бюджет облака"
     return None
+
+
+def _cloud_spend_since_reset() -> int:
+    """Tokens logged since 03:00 Moscow; ruble conversion needs the supplied tariff."""
+    # Moscow has used UTC+3 without seasonal changes since 2014; avoid OS tzdata dependency.
+    zone = timezone(timedelta(hours=3))
+    local_now = datetime.now(zone)
+    reset = datetime.combine(local_now.date(), time(3), tzinfo=zone)
+    if local_now < reset:
+        reset -= timedelta(days=1)
+    cutoff = reset.astimezone(timezone.utc).isoformat()
+    init_db()
+    with connect() as connection:
+        row = connection.execute(
+            "SELECT COALESCE(SUM(tokens), 0) AS tokens FROM llm_calls "
+            "WHERE provider = 'cloud' AND created_at >= ?",
+            (cutoff,),
+        ).fetchone()
+    return int(row["tokens"])
 
 
 def _closed_reason() -> str:

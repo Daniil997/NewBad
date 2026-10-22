@@ -74,7 +74,8 @@ modes:
     allow_cloud: true
     tiers:
       light: [{provider: cloud, model: google/gemma-4-26b-a4b-it}]
-      heavy: [{provider: cloud, model: qwen/qwen3.6-35b-a3b}]
+      # Gemma прошла smoke-проверку API; Qwen из прошлого прогона не завершила вызов.
+      heavy: [{provider: cloud, model: google/gemma-4-26b-a4b-it}]
   replay:
     cache_only: true
     tiers:

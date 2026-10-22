@@ -97,6 +97,13 @@ def init_db() -> None:
                 text TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS user_feedback (
+                id INTEGER PRIMARY KEY,
+                client_id TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                helpful INTEGER NOT NULL CHECK (helpful IN (0, 1)),
+                created_at TEXT NOT NULL
+            );
             """
         )
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(pasted_news)")}

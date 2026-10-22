@@ -105,6 +105,7 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
   const [profileError, setProfileError] = useState("");
   const [feedError, setFeedError] = useState("");
   const [cardError, setCardError] = useState("");
+  const [feedbackSent, setFeedbackSent] = useState(false);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -198,6 +199,7 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
     setCard(null);
     setCardPhase("loading");
     setCardError("");
+    setFeedbackSent(false);
     void fetch(`/api/clients/${selected}/events/${eventId}/card`, { method: "POST", signal: controller.signal })
       .then((response) => {
         if (!response.ok) {
@@ -285,6 +287,16 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
     } finally {
       setPasteBusy(false);
     }
+  }
+
+  async function sendFeedback(helpful: boolean) {
+    if (!selected || !eventId || feedbackSent) return;
+    const response = await fetch(`/api/clients/${selected}/events/${eventId}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ helpful }),
+    });
+    if (response.ok) setFeedbackSent(true);
   }
 
   const problem = listError || profileError || feedError || cardError;
@@ -397,6 +409,17 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
                   onQuestion={setQuestion}
                   onAsk={ask}
                 />
+                <div className="feedback" aria-live="polite">
+                  {feedbackSent ? (
+                    <p>Спасибо, оценка учтена.</p>
+                  ) : (
+                    <>
+                      <span>Карточка была полезна?</span>{" "}
+                      <button type="button" onClick={() => void sendFeedback(true)}>Да</button>{" "}
+                      <button type="button" onClick={() => void sendFeedback(false)}>Нет</button>
+                    </>
+                  )}
+                </div>
               </>
             ) : (
               <p>

@@ -49,6 +49,7 @@ def test_clear_events_keep_their_category():
     assert classify("Безработица осталась на низком уровне") == "consumption_labor"
     assert classify("Опубликован проект поправок по налогу на прибыль") == "regulation_tax"
     assert classify("Налоговая ставка для компаний вырастет") == "regulation_tax"
+    assert classify("Поставки нефти временно остановили на время ремонта") == "commodities_energy"
 
     news = {item.id: item for item in load_news()}
     assert news["cbr-rate-14"].event_type == "monetary_policy"

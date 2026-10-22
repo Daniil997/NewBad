@@ -41,16 +41,23 @@ def request_copy(ctx: AgentContext) -> dict | None:
         return None
     packet = evidence_packet(ctx)
     allowed = _index(packet)
+    news_ids = [item["evidence_id"] for item in packet if item["source"] == "news"]
+    bank_ids = [item["evidence_id"] for item in packet if item["layer"] == _BANK]
+    inference_ids = [item["evidence_id"] for item in packet if item["layer"] in {_FACT, _BANK}]
     payload, route, tokens = _ask(
         _messages(
             (
-                "Собери карточку по списку evidence. Верни JSON с ключами fact, bank и inference. "
-                "fact: layer confirmed_fact и evidence_ids только из доказательств этого слоя. "
-                "bank: null, если банковского доказательства нет; иначе layer bank_position, "
-                "text — подстрока цитаты, evidence_ids только банковские. "
-                "inference: layer model_inference и поля why, risk, opportunity, next_step, question. "
-                "evidence_ids inference бери только из переданного списка. "
-                "Не выдумывай id, адреса и числа, которых нет в evidence."
+                "Верни только один JSON-объект строго такой формы, без markdown и других ключей: "
+                '{"fact":{"text":"короткий факт из новости","layer":"confirmed_fact",'
+                '"evidence_ids":["ID_НОВОСТИ"]},"bank":null или '
+                '{"text":"дословная цитата банка","layer":"bank_position","evidence_ids":["ID_БАНКА"]},'
+                '"inference":{"layer":"model_inference","evidence_ids":["ID_НОВОСТИ","ID_ПРИЗНАКА"],'
+                '"why":"...","risk":"...","opportunity":"...","next_step":"...","question":"..."}}. '
+                f"Допустимые ID: fact={news_ids}; bank={bank_ids}; inference={inference_ids}. "
+                "В fact укажи только ID новости и процитируй короткое предложение из неё. "
+                "В bank укажи только ID банковской страницы и точную подстроку её цитаты; если банковской страницы нет, bank=null. "
+                "Для inference выбери только нужные ID, не перечисляй весь список. "
+                "Не добавляй неподтверждённые числа, даты, причины или утверждения."
             ),
             {"evidence": packet, "issues": ctx.issues},
         ),

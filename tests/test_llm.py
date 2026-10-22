@@ -28,7 +28,7 @@ def test_local_mode_extracts_and_drafts_pasted_news(monkeypatch, tmp_path):
         seen.append(system)
         if "tools" in system:
             content = '{"tools":["get_profile","search_news","search_bank_analytics","get_counterparties"]}'
-        elif "факт" in system:
+        elif "Извлеки один короткий факт" in system:
             evidence_id = user["evidence"][0]["evidence_id"]
             content = json.dumps(
                 {

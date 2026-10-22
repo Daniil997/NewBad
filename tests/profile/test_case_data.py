@@ -44,6 +44,31 @@ def test_case_extract_has_borrower_and_saver(case_extract):
     assert all(path.is_file() for path in files)
 
 
+def test_real_case_rate_signal_personalizes_feed_and_card(case_extract, monkeypatch, tmp_path):
+    from app.agent.loop import build_card
+    from app.scoring.feed import build_feed
+
+    monkeypatch.setenv("LLM_MODE", "mock")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    clear_case_cache()
+    borrower = build_feed("U_26030")
+    saver = build_feed("U_99802")
+    peer = build_feed("U_408263")
+    assert borrower and saver and peer
+    borrower_rate = next(item for item in [*borrower.top, *borrower.less_relevant] if item.news_id == "cbr-rate-14")
+    saver_rate = next(item for item in [*saver.top, *saver.less_relevant] if item.news_id == "cbr-rate-14")
+    peer_rate = next(item for item in [*peer.top, *peer.less_relevant] if item.news_id == "cbr-rate-14")
+    assert borrower_rate.score > peer_rate.score
+    assert saver_rate.score > peer_rate.score
+    assert "Заёмное финансирование" in borrower_rate.reason
+    assert "Депозиты" in saver_rate.reason
+
+    borrower_card = build_card("U_26030", "cbr-rate-14")
+    saver_card = build_card("U_99802", "cbr-rate-14")
+    assert borrower_card and saver_card
+    assert borrower_card.why_for_company.claims[0].text != saver_card.why_for_company.claims[0].text
+
+
 def _write_companies(path, rows: list[dict[str, str]]) -> None:
     header = sorted(COMPANY_COLUMNS)
     lines = [";".join(header)]

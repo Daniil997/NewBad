@@ -68,7 +68,7 @@ event_types:
     title: Сырьё и энергоносители
     priority: 70
     triggers:
-      - {phrase: нефть}
+      - {phrase: нефт}
       - {phrase: brent}
       - {phrase: urals}
       - {phrase: газ}

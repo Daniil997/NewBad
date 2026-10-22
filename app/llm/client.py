@@ -77,6 +77,8 @@ def complete(
         "temperature": 0.2,
         "max_tokens": min(max_tokens, _token_cap()),
     }
+    if chosen == "cloud":
+        payload["response_format"] = {"type": "json_object"}
     if options:
         payload["options"] = options
     started = time.perf_counter()
@@ -107,10 +109,30 @@ def parse_json(text: str) -> dict:
     try:
         payload = json.loads(cleaned)
     except json.JSONDecodeError as exc:
-        raise LLMError("модель вернула не JSON") from exc
+        payload = _first_json_object(cleaned)
+        if payload is None:
+            raise LLMError("модель вернула не JSON") from exc
     if not isinstance(payload, dict):
         raise LLMError("модель вернула не объект")
     return payload
+
+
+def _first_json_object(text: str) -> dict | None:
+    """Accept a single JSON object wrapped in harmless model prose or code fences."""
+    decoder = json.JSONDecoder()
+    offset = 0
+    while True:
+        start = text.find("{", offset)
+        if start < 0:
+            return None
+        try:
+            value, _end = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            offset = start + 1
+            continue
+        if isinstance(value, dict):
+            return value
+        offset = start + 1
 
 
 def server_reachable() -> bool:

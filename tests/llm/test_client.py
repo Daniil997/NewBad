@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from app.db import connect
-from app.llm.client import LLMError, complete, post_chat
+from app.llm.client import LLMError, complete, parse_json, post_chat
 
 CLOUD_URL = "https://changellenge.up.railway.app/v1"
 MODEL = "google/gemma-4-26b-a4b-it"
@@ -61,6 +61,13 @@ def test_local_call_sends_options_once_and_no_auth(monkeypatch, tmp_path):
     assert list(_ok.seen["payload"]) == ["model", "messages", "temperature", "max_tokens", "options"]
 
 
+def test_json_parser_accepts_a_single_object_inside_model_wrappers():
+    assert parse_json('Ответ:\n```json\n{"answer":"готово"}\n```\n') == {"answer": "готово"}
+    assert parse_json('Пояснение {"answer":"готово"} конец') == {"answer": "готово"}
+    with pytest.raises(LLMError, match="не JSON"):
+        parse_json("только текст без объекта")
+
+
 def test_cloud_call_uses_env_url_and_bearer_header(monkeypatch, tmp_path):
     _cloud(monkeypatch, tmp_path)
     monkeypatch.setenv("CASE_LLM_BASE_URL", "http://127.0.0.1:9/v1")
@@ -76,6 +83,7 @@ def test_cloud_call_uses_env_url_and_bearer_header(monkeypatch, tmp_path):
     assert _ok.seen["url"] == "http://127.0.0.1:9/v1/chat/completions"
     assert "test-key" not in _ok.seen["url"]
     assert "options" not in _ok.seen["payload"]
+    assert _ok.seen["payload"]["response_format"] == {"type": "json_object"}
     assert "test-key" not in json.dumps(_ok.seen["payload"])
     assert _ok.seen["headers"] == {"Authorization": "Bearer test-key"}
     with connect() as connection:

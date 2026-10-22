@@ -96,3 +96,22 @@ def test_status_hides_the_key_and_reports_indexes(monkeypatch, tmp_path):
     assert _SECRET not in text
     assert "Authorization" not in text
     assert "CASE_LLM" not in text
+
+
+def test_feedback_is_persisted_and_metrics_are_aggregated(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    with TestClient(app) as client:
+        positive = client.post(
+            "/api/clients/U-SAVER/events/cbr-rate-14/feedback", json={"helpful": True}
+        )
+        negative = client.post(
+            "/api/clients/U-BORROWER/events/cbr-rate-14/feedback", json={"helpful": False}
+        )
+        invalid = client.post("/api/clients/U-SAVER/events/no-such-event/feedback", json={"helpful": True})
+        metrics = client.get("/api/metrics/feedback")
+
+    assert positive.json() == {"status": "saved"}
+    assert negative.json() == {"status": "saved"}
+    assert invalid.status_code == 404
+    assert metrics.json() == {"responses": 2, "helpful": 1, "not_helpful": 1, "helpful_share": 0.5}
+    assert "U-SAVER" not in metrics.text

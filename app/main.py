@@ -2,6 +2,7 @@ import os
 import re
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -19,12 +20,13 @@ from app.corpus.search import (
     search_bank_analytics,
     search_news,
 )
-from app.db import init_db, journal_is_empty, journal_tables
+from app.db import connect, init_db, journal_is_empty, journal_tables
 from app.profile.build import ClientProfile, ClientSummary, get_profile, load_profiles
 from app.schemas.card import Card
 from app.scoring.feed import Feed, build_feed
 from app.llm.placement import decide, placement_label
 from app.llm.router import current_route, local_status
+from app.agent.tools import find_news
 from app.tracing.journal import latest_steps, read_trace
 
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$")
@@ -95,6 +97,10 @@ class ChatQuestion(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
 
 
+class Feedback(BaseModel):
+    helpful: bool
+
+
 class SettingsView(BaseModel):
     mode: str
     allow_cloud: bool
@@ -135,6 +141,33 @@ def event_chat(client_id: str, event_id: str, body: ChatQuestion) -> ChatReply:
         return answer_from_card(card, body.question, client_id, event_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/clients/{client_id}/events/{event_id}/feedback")
+def event_feedback(client_id: str, event_id: str, body: Feedback) -> dict[str, str]:
+    _check_id(client_id, "компании")
+    _check_id(event_id, "события")
+    if get_profile(client_id) is None or find_news(event_id) is None:
+        raise HTTPException(status_code=404, detail="Компания или событие не найдены")
+    with connect() as connection:
+        connection.execute(
+            "INSERT INTO user_feedback (client_id, event_id, helpful, created_at) VALUES (?, ?, ?, ?)",
+            (client_id, event_id, int(body.helpful), datetime.now(timezone.utc).isoformat()),
+        )
+    return {"status": "saved"}
+
+
+@app.get("/api/metrics/feedback")
+def feedback_metrics() -> dict[str, int | float]:
+    """Обезличенная сводка для регулярного контроля качества прототипа."""
+    with connect() as connection:
+        row = connection.execute(
+            "SELECT COUNT(*) AS total, COALESCE(SUM(helpful), 0) AS helpful FROM user_feedback"
+        ).fetchone()
+    total = int(row["total"])
+    helpful = int(row["helpful"])
+    return {"responses": total, "helpful": helpful, "not_helpful": total - helpful,
+            "helpful_share": helpful / total if total else 0.0}
 
 
 @app.post("/api/clients/{client_id}/news")

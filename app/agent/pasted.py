@@ -78,3 +78,10 @@ def pasted_by_id(event_id: str) -> NewsItem | None:
         source=row["source"] or None,
         status="pasted",
     )
+
+
+def load_pasted_news() -> list[NewsItem]:
+    init_db()
+    with connect() as connection:
+        ids = [row["id"] for row in connection.execute("SELECT id FROM pasted_news ORDER BY created_at, id")]
+    return [item for event_id in ids if (item := pasted_by_id(event_id)) is not None]
