@@ -10,6 +10,7 @@ services:
     environment:
       LLM_MODE: ${LLM_MODE:-mock}
       ALLOW_CLOUD: ${ALLOW_CLOUD:-false}
+      PROFILE_SOURCE: ${PROFILE_SOURCE:-demo}
       LOCAL_LLM_BASE_URL: ${LOCAL_LLM_BASE_URL:-http://host.docker.internal:8080/v1}
       CASE_LLM_BASE_URL: ${CASE_LLM_BASE_URL:-}
       CASE_LLM_API_KEY: ${CASE_LLM_API_KEY:-}
