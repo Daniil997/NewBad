@@ -14,7 +14,7 @@ type ClientProfile = {
   cohort_share: number | null;
   cohort_key: string | null;
   missing_data: string[];
-  exposures: { id: string }[];
+  exposures: { id: string; title: string }[];
 };
 
 type FeedItem = {
@@ -41,21 +41,26 @@ type Source = {
   title: string;
   origin: string | null;
   url: string | null;
+  page: number | null;
+  quote: string | null;
 };
 
 type InsightCard = {
   event_id: string;
+  confidence: number;
   what_happened: { claims: Claim[]; assumptions: string[] };
   why_for_company: { claims: Claim[] };
   consequences: { risks: Claim[]; opportunities: Claim[]; depends_on: string[] };
   action: { next_step: string; questions: string[] };
-  bank_view: { status: string; quote: string; summary: string };
+  bank_view: { status: string; quote: string; summary: string; page: number | null };
   sources: Source[];
   features_triggered: string[];
   missing_data: string[];
   assumptions: string[];
   llm_trace: { mode: string; retries: number; model: string; origin?: string };
 };
+
+type Phase = "loading" | "ready" | "empty" | "error";
 
 const ROLE_LABEL: Record<string, string> = {
   borrower: "заёмщик",
@@ -78,21 +83,35 @@ const LAYER_LABEL: Record<string, string> = {
 
 export function Service({ onHome, onSettings }: { onHome: () => void; onSettings: () => void }) {
   const [clients, setClients] = useState<ClientSummary[]>([]);
+  const [clientsPhase, setClientsPhase] = useState<Phase>("loading");
   const [selected, setSelected] = useState("");
   const [profile, setProfile] = useState<ClientProfile | null>(null);
   const [feed, setFeed] = useState<Feed | null>(null);
+  const [feedPhase, setFeedPhase] = useState<Phase>("loading");
   const [eventId, setEventId] = useState("");
   const [card, setCard] = useState<InsightCard | null>(null);
+  const [cardPhase, setCardPhase] = useState<Phase>("loading");
   const [steps, setSteps] = useState<string[]>([]);
   const [traceOpen, setTraceOpen] = useState(false);
   const [messages, setMessages] = useState<{ role: "user" | "service"; text: string }[]>([]);
   const [question, setQuestion] = useState("");
+  const [asking, setAsking] = useState(false);
+  const [failedQuestion, setFailedQuestion] = useState("");
   const [pasteTitle, setPasteTitle] = useState("");
   const [pasteText, setPasteText] = useState("");
-  const [error, setError] = useState("");
+  const [pasteBusy, setPasteBusy] = useState(false);
+  const [pasteError, setPasteError] = useState("");
+  const [listError, setListError] = useState("");
+  const [profileError, setProfileError] = useState("");
+  const [feedError, setFeedError] = useState("");
+  const [cardError, setCardError] = useState("");
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    void fetch("/api/clients")
+    const controller = new AbortController();
+    setClientsPhase("loading");
+    setListError("");
+    void fetch("/api/clients", { signal: controller.signal })
       .then((response) => {
         if (!response.ok) {
           throw new Error(`Список компаний: ${response.status}`);
@@ -101,13 +120,20 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
       })
       .then((items) => {
         setClients(items);
+        setClientsPhase(items.length === 0 ? "empty" : "ready");
         const borrower = items.find((item) => item.money_role === "borrower");
-        setSelected((borrower ?? items[0])?.client_id ?? "");
+        setSelected((current) => current || (borrower ?? items[0])?.client_id || "");
       })
       .catch((reason: unknown) => {
-        setError(reason instanceof Error ? reason.message : "Не удалось загрузить компании");
+        if (!controller.signal.aborted) {
+          setClientsPhase("error");
+          setFeedPhase("empty");
+          setCardPhase("empty");
+          setListError(reason instanceof Error ? reason.message : "Не удалось загрузить компании");
+        }
       });
-  }, []);
+    return () => controller.abort();
+  }, [attempt]);
 
   useEffect(() => {
     if (!selected) {
@@ -115,6 +141,15 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
     }
     const controller = new AbortController();
     setMessages([]);
+    setFailedQuestion("");
+    setProfile(null);
+    setFeed(null);
+    setFeedPhase("loading");
+    setFeedError("");
+    setProfileError("");
+    setCard(null);
+    setCardPhase("loading");
+    setEventId("");
     void fetch(`/api/clients/${selected}`, { signal: controller.signal })
       .then((response) => {
         if (!response.ok) {
@@ -125,7 +160,7 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
       .then(setProfile)
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) {
-          setError(reason instanceof Error ? reason.message : "Не удалось загрузить профиль");
+          setProfileError(reason instanceof Error ? reason.message : "Не удалось загрузить профиль");
         }
       });
     void fetch(`/api/clients/${selected}/feed`, { signal: controller.signal })
@@ -137,15 +172,21 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
       })
       .then((payload) => {
         setFeed(payload);
-        setEventId(payload.top[0]?.news_id ?? "");
+        const next = payload.top[0]?.news_id ?? "";
+        setEventId(next);
+        setFeedPhase(payload.top.length + payload.less_relevant.length === 0 ? "empty" : "ready");
+        if (!next) {
+          setCardPhase("empty");
+        }
       })
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) {
-          setError(reason instanceof Error ? reason.message : "Не удалось загрузить ленту");
+          setFeedPhase("error");
+          setFeedError(reason instanceof Error ? reason.message : "Не удалось загрузить ленту");
         }
       });
     return () => controller.abort();
-  }, [selected]);
+  }, [selected, attempt]);
 
   useEffect(() => {
     if (!selected || !eventId) {
@@ -153,6 +194,10 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
     }
     const controller = new AbortController();
     setMessages([]);
+    setFailedQuestion("");
+    setCard(null);
+    setCardPhase("loading");
+    setCardError("");
     void fetch(`/api/clients/${selected}/events/${eventId}/card`, { method: "POST", signal: controller.signal })
       .then((response) => {
         if (!response.ok) {
@@ -162,6 +207,7 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
       })
       .then(async (payload) => {
         setCard(payload);
+        setCardPhase("ready");
         const stepsResponse = await fetch(`/api/clients/${selected}/events/${eventId}/steps`, {
           signal: controller.signal,
         });
@@ -174,53 +220,74 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
       })
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) {
-          setError(reason instanceof Error ? reason.message : "Не удалось собрать карточку");
+          setCardPhase("error");
+          setCardError(reason instanceof Error ? reason.message : "Не удалось собрать карточку");
         }
       });
     return () => controller.abort();
-  }, [selected, eventId]);
+  }, [selected, eventId, attempt]);
 
   async function ask(text: string) {
     const cleaned = text.trim();
-    if (!cleaned || !selected || !eventId) {
+    if (!cleaned || !selected || !eventId || asking) {
       return;
     }
     setQuestion("");
+    setFailedQuestion("");
+    setAsking(true);
     setMessages((current) => [...current, { role: "user", text: cleaned }]);
-    const response = await fetch(`/api/clients/${selected}/events/${eventId}/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: cleaned }),
-    });
-    if (!response.ok) {
-      setMessages((current) => [...current, { role: "service", text: `Не удалось ответить: ${response.status}` }]);
-      return;
+    try {
+      const response = await fetch(`/api/clients/${selected}/events/${eventId}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: cleaned }),
+      });
+      if (!response.ok) {
+        setFailedQuestion(cleaned);
+        setMessages((current) => [...current, { role: "service", text: `Не удалось ответить: ${response.status}` }]);
+        return;
+      }
+      const payload = (await response.json()) as { answer: string };
+      setMessages((current) => [...current, { role: "service", text: payload.answer }]);
+    } catch {
+      setFailedQuestion(cleaned);
+      setMessages((current) => [...current, { role: "service", text: "Нет ответа от сервера" }]);
+    } finally {
+      setAsking(false);
     }
-    const payload = (await response.json()) as { answer: string };
-    setMessages((current) => [...current, { role: "service", text: payload.answer }]);
   }
 
   async function pasteNews() {
-    if (!selected) {
+    if (!selected || pasteBusy) {
       return;
     }
-    const response = await fetch(`/api/clients/${selected}/news`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: pasteTitle, text: pasteText }),
-    });
-    if (!response.ok) {
-      setError(`Своя новость: ${response.status}`);
-      return;
+    setPasteBusy(true);
+    setPasteError("");
+    try {
+      const response = await fetch(`/api/clients/${selected}/news`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: pasteTitle, text: pasteText }),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+        setPasteError(payload?.detail || `Своя новость: ${response.status}`);
+        return;
+      }
+      const payload = (await response.json()) as InsightCard;
+      setCard(payload);
+      setCardPhase("ready");
+      setEventId(payload.event_id);
+      setPasteTitle("");
+      setPasteText("");
+    } catch {
+      setPasteError("Нет ответа от сервера");
+    } finally {
+      setPasteBusy(false);
     }
-    const payload = (await response.json()) as InsightCard;
-    setCard(payload);
-    setEventId(payload.event_id);
-    setPasteTitle("");
-    setPasteText("");
   }
 
-  const newsSource = card?.sources.find((item) => item.kind === "news");
+  const problem = listError || profileError || feedError || cardError;
 
   return (
     <div className="bank">
@@ -234,8 +301,17 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
       </header>
       <main className="bank-main">
         <h1>Что важно для вашей компании</h1>
-        {error ? <p className="error">{error}</p> : null}
+        {problem ? (
+          <p className="error">
+            {problem}{" "}
+            <button className="linkish" type="button" onClick={() => setAttempt((current) => current + 1)}>
+              Повторить
+            </button>
+          </p>
+        ) : null}
         <div className="switcher">
+          {clientsPhase === "loading" ? <p>Загружаем компании…</p> : null}
+          {clientsPhase === "empty" ? <p>Компаний нет.</p> : null}
           {clients.map((client) => (
             <button
               key={client.client_id}
@@ -250,6 +326,9 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
         </div>
         <div className="workspace">
           <section className="card">
+            {selected && !profile ? (
+              <p>{profileError ? "Профиль не загрузился." : "Загружаем профиль…"}</p>
+            ) : null}
             {profile ? (
               <dl>
                 <div>
@@ -274,26 +353,37 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
                 </div>
               </dl>
             ) : null}
-            <h2>Важно для компании</h2>
-            <FeedItems items={feed?.top ?? []} eventId={eventId} onSelect={setEventId} />
-            <h2>Менее значимо для вас</h2>
-            <FeedItems items={feed?.less_relevant ?? []} eventId={eventId} onSelect={setEventId} />
+            <h2>Сигналы</h2>
+            {profile && profile.exposures.length > 0 ? (
+              <ul className="signals">
+                {profile.exposures.map((item) => (
+                  <li key={item.id}>{item.title}</li>
+                ))}
+              </ul>
+            ) : (
+              <p>{profile ? "Сигналов нет." : "Сигналы появятся вместе с профилем."}</p>
+            )}
+            {selected && feedPhase === "loading" ? <p>Собираем ленту…</p> : null}
+            {feedPhase === "error" ? <p>Лента не загрузилась.</p> : null}
+            {feed ? (
+              <>
+                <h2>Важно для компании</h2>
+                <FeedItems items={feed.top} eventId={eventId} onSelect={setEventId} />
+                <h2>Менее значимо для вас</h2>
+                <FeedItems items={feed.less_relevant} eventId={eventId} onSelect={setEventId} />
+              </>
+            ) : null}
           </section>
           <section className="card insight">
-            {card ? (
+            {card && cardPhase === "ready" ? (
               <>
                 <CardBody card={card} />
                 <p className="meta">
+                  Уверенность {Math.round(card.confidence * 100)}%.{" "}
                   {ORIGIN_LABEL[card.llm_trace.origin ?? "template"] ?? "шаблон"}, режим {card.llm_trace.mode},
                   повторов проверки {card.llm_trace.retries}
                 </p>
-                {newsSource?.url ? (
-                  <a className="source-link" href={newsSource.url} target="_blank" rel="noreferrer">
-                    Открыть источник
-                  </a>
-                ) : (
-                  <p>У новости нет ссылки.</p>
-                )}
+                <p className="note">Не хватает: {card.missing_data.join(", ") || "пропусков нет"}</p>
                 <button className="linkish" type="button" onClick={() => setTraceOpen((open) => !open)}>
                   Как получен вывод
                 </button>
@@ -302,12 +392,22 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
                   questions={card.action.questions}
                   messages={messages}
                   question={question}
+                  asking={asking}
+                  failedQuestion={failedQuestion}
                   onQuestion={setQuestion}
                   onAsk={ask}
                 />
               </>
             ) : (
-              <p>Собираем карточку…</p>
+              <p>
+                {!selected
+                  ? "Выберите компанию."
+                  : cardPhase === "error"
+                    ? "Не удалось собрать карточку."
+                    : cardPhase === "empty" || (feedPhase === "ready" && !eventId) || feedPhase === "empty"
+                      ? "В ленте нет новости для карточки."
+                      : "Собираем карточку…"}
+              </p>
             )}
           </section>
         </div>
@@ -326,8 +426,9 @@ export function Service({ onHome, onSettings }: { onHome: () => void; onSettings
             aria-label="Текст своей новости"
             rows={4}
           />
-          <button type="button" onClick={() => void pasteNews()}>
-            Разобрать
+          {pasteError ? <p className="error">{pasteError}</p> : null}
+          <button type="button" onClick={() => void pasteNews()} disabled={pasteBusy || !selected}>
+            {pasteBusy ? "Разбираем…" : "Разобрать"}
           </button>
         </section>
       </main>
@@ -376,8 +477,10 @@ function CardBody({ card }: { card: InsightCard }) {
       ) : null}
       <h2>Почему это важно этой компании</h2>
       <Claims claims={card.why_for_company.claims} />
-      <h2>Какие последствия</h2>
-      <Claims claims={[...card.consequences.risks, ...card.consequences.opportunities]} />
+      <h2>Риск</h2>
+      <Claims claims={card.consequences.risks} />
+      <h2>Возможность</h2>
+      <Claims claims={card.consequences.opportunities} />
       {card.consequences.depends_on.length > 0 ? <p className="note">Зависит от: {card.consequences.depends_on.join(" ")}</p> : null}
       <h2>Какое действие уместно</h2>
       <p>
@@ -387,6 +490,7 @@ function CardBody({ card }: { card: InsightCard }) {
       {card.bank_view.status === "found" ? (
         <blockquote>
           <Badge layer="bank_position" /> {card.bank_view.quote}
+          {card.bank_view.page ? <span className="meta"> стр. {card.bank_view.page}</span> : null}
         </blockquote>
       ) : (
         <p>Материала банка нет.</p>
@@ -394,13 +498,29 @@ function CardBody({ card }: { card: InsightCard }) {
       <h2>На чём основан вывод</h2>
       <ul className="sources">
         {card.sources.map((source) => (
-          <li key={source.id}>
-            {source.title}
-            {source.origin ? <span>{source.origin}</span> : null}
-          </li>
+          <SourceItem key={source.id} source={source} />
         ))}
       </ul>
     </>
+  );
+}
+
+function SourceItem({ source }: { source: Source }) {
+  const title = source.url ? (
+    <a href={source.url} target="_blank" rel="noreferrer">
+      {source.title}
+    </a>
+  ) : (
+    source.title
+  );
+  return (
+    <li>
+      {title}
+      {source.kind === "bank_analytics" && source.page ? <span>стр. {source.page}</span> : null}
+      {source.kind === "bank_analytics" && source.quote ? <q>{source.quote}</q> : null}
+      {source.kind === "news" && !source.url ? <span>ссылки нет</span> : null}
+      {source.kind === "company_feature" && source.origin ? <span>{source.origin}</span> : null}
+    </li>
   );
 }
 
@@ -446,12 +566,16 @@ function Chat({
   questions,
   messages,
   question,
+  asking,
+  failedQuestion,
   onQuestion,
   onAsk,
 }: {
   questions: string[];
   messages: { role: "user" | "service"; text: string }[];
   question: string;
+  asking: boolean;
+  failedQuestion: string;
   onQuestion: (value: string) => void;
   onAsk: (text: string) => Promise<void>;
 }) {
@@ -460,7 +584,7 @@ function Chat({
       <h2>Уточнить</h2>
       <div className="quick">
         {questions.map((item) => (
-          <button key={item} type="button" onClick={() => void onAsk(item)}>
+          <button key={item} type="button" onClick={() => void onAsk(item)} disabled={asking}>
             {item}
           </button>
         ))}
@@ -477,8 +601,15 @@ function Chat({
           placeholder="Свой вопрос"
           aria-label="Вопрос по карточке"
         />
-        <button type="submit">Спросить</button>
+        <button type="submit" disabled={asking}>
+          {asking ? "Отвечаем…" : "Спросить"}
+        </button>
       </form>
+      {failedQuestion ? (
+        <button className="linkish" type="button" onClick={() => void onAsk(failedQuestion)}>
+          Повторить вопрос
+        </button>
+      ) : null}
       <ul className="messages">
         {messages.map((item, index) => (
           <li key={`${item.role}-${index}`} className={item.role}>

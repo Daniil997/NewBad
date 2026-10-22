@@ -304,6 +304,32 @@ dd {
   color: #555;
 }
 
+.sources {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sources li {
+  padding: 0.35rem 0;
+  border-top: 1px solid #eee;
+}
+
+.sources a {
+  color: #ef3124;
+}
+
+.sources q {
+  display: block;
+  margin-top: 0.2rem;
+  color: #444;
+}
+
+.signals {
+  margin: 0 0 1rem;
+  padding-left: 1.1rem;
+}
+
 .source-link,
 .linkish {
   background: transparent;
