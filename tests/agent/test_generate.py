@@ -203,6 +203,28 @@ def test_profile_chat_retries_answer_with_unsupported_numbers(monkeypatch):
     assert len(calls) == 2
     assert any("не прошёл проверку фактов" in message["content"] for message in calls[1])
 
+
+def test_profile_chat_can_disable_numeric_grounding(monkeypatch):
+    monkeypatch.setattr(
+        "app.agent.generate.developer_settings",
+        lambda: {"validate_numeric_grounding": False},
+    )
+    _install(monkeypatch, {
+        "answer": "Расходы могут вырасти на 14 процентов.",
+        "evidence_ids": ["company-profile", "news:item"],
+    })
+    evidence = [
+        {"evidence_id": "company-profile", "text": "Компания оказывает услуги связи."},
+        {"evidence_id": "news:item", "text": "В материале описаны изменения тарифов."},
+    ]
+
+    result = answer_profile_chat("Как это повлияет?", [], evidence)
+
+    assert result is not None
+    assert result["answer"] == "Расходы могут вырасти на 14 процентов."
+
+
+
 def test_mock_provider_does_not_call_the_model(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("LLM_MODE", "mock")
