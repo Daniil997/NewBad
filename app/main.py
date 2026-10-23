@@ -1392,7 +1392,7 @@ def paste_news(client_id: str, body: PasteNews) -> Card:
 
 @app.post("/api/settings")
 def update_settings(body: SettingsUpdate) -> SettingsView:
-    """Переключает режим текущего процесса. Файл .env и ключ не меняются."""
+    """Сохраняет маршруты задач и параметры данных; legacy-поля модели необязательны."""
     if body.mode is not None and body.mode not in known_modes():
         raise HTTPException(status_code=400, detail="Некорректный общий режим модели")
     if body.placement is not None and body.placement not in _PLACEMENTS:
