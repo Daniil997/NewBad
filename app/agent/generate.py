@@ -1,5 +1,7 @@
 import json
+import logging
 import re
+import time
 from contextvars import ContextVar
 
 import yaml
@@ -10,6 +12,8 @@ from app.corpus.search import NewsItem
 from app.db import ROOT
 from app.llm.client import LLMError, parse_json
 from app.llm.router import Route, complete_tier, token_limit
+
+logger = logging.getLogger(__name__)
 
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 _FACT = "confirmed_fact"
@@ -344,19 +348,38 @@ def _news_evidence(news: NewsItem, text: str | None = None) -> dict:
 
 def _ask(messages: list[dict[str, str]], max_tokens: int, *, task: str | None = None, space: str = "demo") -> tuple[dict | None, Route, int]:
     reset_failure()
+    started = time.perf_counter()
+    logger.info("llm_generation_start task=%s space=%s tier=heavy max_tokens=%s", task or "default", space, max_tokens)
     outcome = complete_tier(messages, tier="heavy", max_tokens=max_tokens, task=task, space=space)
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
     if not outcome.text:
-        # Модель не вызывалась (mock, закрытое облако, недоступный локальный сервер) или вернула пустоту.
+        # Не логируем промпт, профиль компании или содержимое новости.
+        logger.warning(
+            "llm_generation_no_text task=%s space=%s mode=%s provider=%s model=%s elapsed_ms=%s reason=%s",
+            task or "default", space, outcome.route.mode, outcome.route.provider,
+            outcome.route.model, elapsed_ms, outcome.route.reason,
+        )
         record_failure(
             "model_unavailable", outcome.route.reason,
             mode=outcome.route.mode, provider=outcome.route.provider, model=outcome.route.model,
         )
         return None, outcome.route, 0
     try:
-        return parse_json(outcome.text), outcome.route, outcome.tokens
-    except LLMError:
+        payload = parse_json(outcome.text)
+        logger.info(
+            "llm_generation_json_ok task=%s space=%s mode=%s provider=%s model=%s elapsed_ms=%s tokens=%s",
+            task or "default", space, outcome.route.mode, outcome.route.provider,
+            outcome.route.model, elapsed_ms, outcome.tokens,
+        )
+        return payload, outcome.route, outcome.tokens
+    except LLMError as exc:
+        logger.warning(
+            "llm_generation_invalid_json task=%s space=%s mode=%s provider=%s model=%s elapsed_ms=%s error=%s content_length=%s",
+            task or "default", space, outcome.route.mode, outcome.route.provider,
+            outcome.route.model, elapsed_ms, str(exc), len(outcome.text),
+        )
         record_failure(
-            "invalid_json", "ответ модели не разобран как JSON",
+            "invalid_json", str(exc),
             mode=outcome.route.mode, provider=outcome.route.provider, model=outcome.route.model,
         )
         return None, outcome.route, 0
@@ -364,6 +387,10 @@ def _ask(messages: list[dict[str, str]], max_tokens: int, *, task: str | None = 
 
 def _reject(route: Route, reason: str) -> None:
     """Модель ответила, но ответ не прошёл проверку по материалам."""
+    logger.warning(
+        "llm_generation_validation_failed mode=%s provider=%s model=%s reason=%s",
+        route.mode, route.provider, route.model, reason,
+    )
     record_failure("validation", reason, mode=route.mode, provider=route.provider, model=route.model)
 
 
