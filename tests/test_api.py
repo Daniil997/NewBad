@@ -112,7 +112,7 @@ def test_settings_save_does_not_change_global_model_environment(monkeypatch, tmp
                 "allow_cloud": True,
                 "placement": "ram",
                 "task_routes": {
-                    "real": {"profile_site": "local_gemma", "news_report": "mock", "chat": "local_qwen"},
+                    "real": {"profile_site": "local_gemma", "news_report": "mock", "news_selection": "local_qwen", "chat": "local_qwen"},
                     "demo": {"news_card": "mock", "chat": "mock"},
                 },
             },
@@ -120,6 +120,7 @@ def test_settings_save_does_not_change_global_model_environment(monkeypatch, tmp
         invalid = client.post("/api/settings", json={"task_routes": {"demo": {"chat": "inherit"}}})
     assert changed.status_code == 200
     assert changed.json()["task_routes"]["real"]["profile_site"] == "local_gemma"
+    assert changed.json()["task_routes"]["real"]["news_selection"] == "local_qwen"
     assert __import__("os").environ["LLM_MODE"] == "mock"
     assert __import__("os").environ["ALLOW_CLOUD"] == "false"
     assert __import__("os").environ["LLM_PLACEMENT"] == "auto"
