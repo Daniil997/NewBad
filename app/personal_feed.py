@@ -1,4 +1,4 @@
-"""Persistent, rule-based personalization for authenticated real-mode profiles."""
+"""Persistent, model-assisted personalization for authenticated real-mode profiles."""
 
 import hashlib
 import json
