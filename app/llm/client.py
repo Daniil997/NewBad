@@ -85,8 +85,9 @@ def complete(
     elif "11434" in base:
         # Ollama's thinking models may spend the output budget on reasoning and
         # return an empty message.content, which this client correctly rejects.
-        # We need the final answer for JSON parsing and user-facing responses.
+        # Disable thinking using Ollama's option and the OpenAI-compatible parameter.
         payload["think"] = False
+        payload["reasoning_effort"] = "none"
     if options:
         payload["options"] = options
     url = f"{base}/chat/completions"
