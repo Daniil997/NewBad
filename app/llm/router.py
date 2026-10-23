@@ -1,6 +1,8 @@
 import hashlib
 import json
+import logging
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 
@@ -12,6 +14,8 @@ from app.llm.client import LLMError, complete, parse_json, server_reachable
 from app.llm.registry import api_models, require_allowed
 from app.tracing.journal import log_llm_call
 from app.user_store import developer_settings
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_TOOLS = ("get_profile", "search_news", "search_bank_analytics", "get_counterparties")
 
@@ -135,16 +139,35 @@ def complete_tier(messages: list[dict[str, str]], *, tier: str, max_tokens: int,
 
 def _complete_task_route(messages: list[dict[str, str]], selection: str, max_tokens: int) -> TierResult:
     route = _task_route(selection)
+    started = time.perf_counter()
+    logger.info(
+        "llm_task_route_start task_selection=%s mode=%s provider=%s model=%s max_tokens=%s reason=%s",
+        selection, route.mode, route.provider, route.model, max_tokens, route.reason,
+    )
     if route.provider == "mock":
+        logger.warning(
+            "llm_task_route_mock task_selection=%s mode=%s provider=%s model=%s reason=%s",
+            selection, route.mode, route.provider, route.model, route.reason,
+        )
         _log(route.model, route.provider, route.mode, route.reason)
         return TierResult(route)
     provider, mode, model = route.provider, route.mode, route.model
     try:
         result = complete(messages, model=model, mode=mode, max_tokens=max_tokens, provider=provider)
     except LLMError as exc:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
         reason = f"Выбранная модель недоступна ({exc})"
+        logger.warning(
+            "llm_task_route_failed task_selection=%s mode=%s provider=%s model=%s elapsed_ms=%s error=%s",
+            selection, mode, provider, model, elapsed_ms, str(exc),
+        )
         _log("mock-model", "mock", "mock", reason)
         return TierResult(Route(mode="mock", provider="mock", model="mock-model", reason=reason))
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    logger.info(
+        "llm_task_route_success task_selection=%s mode=%s provider=%s model=%s elapsed_ms=%s tokens=%s content_length=%s",
+        selection, mode, provider, result.model, elapsed_ms, result.tokens, len(result.text),
+    )
     _remember(messages, result.model, result.provider, result.text, result.tokens)
     return TierResult(Route(mode=mode, provider=provider, model=result.model, reason="Маршрут модели для выбранной задачи"), result.text, result.tokens)
 
