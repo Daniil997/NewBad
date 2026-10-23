@@ -310,7 +310,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
         <label>Обновление обзора
           <select value={insightRefreshMode} onChange={(event) => setInsightRefreshMode(event.target.value)}>
             <option value="manual">Только вручную</option>
-            <option value="interval">По интервалу</option>
+            <option value="interval">При открытии профиля, если интервал истёк</option>
           </select>
         </label>
         <label>Интервал обновления обзора
@@ -321,15 +321,15 @@ export function Settings({ onBack }: { onBack: () => void }) {
         <label>Хранить сохранённые сводки (дней)
           <input type="number" min={1} max={3650} value={insightRetentionDays} onChange={(event) => setInsightRetentionDays(Number(event.target.value))} />
         </label>
-        <p className="hint">Снимки старше срока удаляются из SQLite при сохранении настройки, открытии профиля и фоновой очистке раз в час. Подробные разборы новостей хранятся отдельно.</p>
+        <p className="hint">Интервал проверяется при открытии профиля — отдельного фонового таймера для обзора нет. Снимки старше срока удаляются из SQLite при сохранении настройки, открытии профиля и фоновой очистке раз в час. Подробные разборы новостей хранятся отдельно.</p>
       </section>
       <section className="card settings-form">
         <h2>Анализ новостей для профиля</h2>
-        <p className="hint">Первая версия использует объяснимые правила и не вызывает модель. Оценки привязаны к версии профиля и материалу.</p>
+        <p className="hint">Первая версия использует объяснимые правила и не вызывает модель. Оценки привязаны к версии профиля и материалу. Условия запуска проверяются при открытии ленты, а не отдельным фоновым таймером.</p>
         <label>Когда запускать анализ
           <select value={analysisTrigger} onChange={(event) => setAnalysisTrigger(event.target.value)}>
-            <option value="first_then_manual">При первом входе, затем вручную</option>
-            <option value="on_new_interval">При новых новостях с интервалом</option>
+            <option value="first_then_manual">При первом открытии ленты, затем вручную</option>
+            <option value="on_new_interval">При открытии ленты, если есть новые новости и интервал истёк</option>
             <option value="manual">Только вручную</option>
           </select>
         </label>
