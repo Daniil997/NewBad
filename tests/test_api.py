@@ -1,5 +1,3 @@
-import os
-
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -100,7 +98,7 @@ def test_status_hides_the_key_and_reports_indexes(monkeypatch, tmp_path):
     assert "CASE_LLM" not in text
 
 
-def test_runtime_settings_switch_without_touching_the_key(monkeypatch, tmp_path):
+def test_settings_save_does_not_change_global_model_environment(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("LLM_MODE", "mock")
     monkeypatch.setenv("ALLOW_CLOUD", "false")
@@ -109,21 +107,24 @@ def test_runtime_settings_switch_without_touching_the_key(monkeypatch, tmp_path)
     with TestClient(app) as client:
         changed = client.post(
             "/api/settings",
-            json={"mode": "replay", "allow_cloud": False, "placement": "ram"},
+            json={
+                "mode": "replay",
+                "allow_cloud": True,
+                "placement": "ram",
+                "task_routes": {
+                    "real": {"profile_site": "local_gemma", "news_report": "mock", "chat": "local_qwen"},
+                    "demo": {"news_card": "mock", "chat": "mock"},
+                },
+            },
         )
-        broken = client.post(
-            "/api/settings",
-            json={"mode": "gpt-4", "allow_cloud": True, "placement": "auto"},
-        )
+        invalid = client.post("/api/settings", json={"task_routes": {"demo": {"chat": "inherit"}}})
     assert changed.status_code == 200
-    assert changed.json()["mode"] == "replay"
-    assert changed.json()["allow_cloud"] is False
-    assert os.environ["LLM_PLACEMENT"] == "ram"
+    assert changed.json()["task_routes"]["real"]["profile_site"] == "local_gemma"
+    assert __import__("os").environ["LLM_MODE"] == "mock"
+    assert __import__("os").environ["ALLOW_CLOUD"] == "false"
+    assert __import__("os").environ["LLM_PLACEMENT"] == "auto"
     assert _SECRET not in changed.text
-    assert broken.status_code == 400
-    assert broken.json()["detail"] == "Некорректный общий режим модели"
-    assert os.environ["LLM_MODE"] == "replay"
-
+    assert invalid.status_code == 422
 
 def test_feedback_is_persisted_and_metrics_are_aggregated(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
