@@ -130,7 +130,7 @@ def extract_profile_suggestions(pages: list[SitePage], current_profile: dict) ->
                 "role": "user",
                 "content": (
                     "Предыдущий ответ не прошёл проверку формата. Исправь его и верни ТОЛЬКО один корректный JSON-объект "
-                    "в точной исходной схеме с ключом \\"suggestions\\" (массив объектов с полями field, value, evidence, "
+                    "в точной исходной схеме с ключом suggestions (массив объектов с полями field, value, evidence, "
                     "source_index, confidence). Не добавляй Markdown, пояснения или текст до/после JSON. "
                     "Используй только сведения и точные цитаты из исходных страниц; не выдумывай значения."
                 ),
