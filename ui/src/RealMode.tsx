@@ -7,7 +7,7 @@ import {
   type SavedProfile, type SiteSuggestion, type User,
 } from "./realTypes";
 import {
-  ChatPanel, InsightPanel, MarketsPanel, NewsDetail, NewsList, ProfileForm, SuggestionsPanel,
+  ChatPanel, MarketsPanel, NewsDetail, NewsList, ProfileForm, SuggestionsPanel,
 } from "./RealParts";
 
 export function RealMode({
@@ -53,7 +53,6 @@ export function RealMode({
   const [selectedNewsId, setSelectedNewsId] = useState("");
   const [activeChatId, setActiveChatId] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
-  const [insightBusy, setInsightBusy] = useState(false);
   const [newsReportBusy, setNewsReportBusy] = useState("");
   const detailRef = useRef<HTMLElement | null>(null);
   const tabInitialized = useRef(false);
@@ -270,19 +269,6 @@ export function RealMode({
     } finally {
       setFeedBusy(false);
     }
-  }
-
-  async function refreshInsightNow() {
-    setInsightBusy(true); setError("");
-    try {
-      const csrfToken = await refreshCsrf();
-      const response = await fetch("/api/real/insight/refresh", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
-      const payload = (await response.json().catch(() => null)) as (RealFeed & { detail?: string }) | null;
-      if (!response.ok || !payload?.insight_status) throw new Error(payload?.detail || "Не удалось обновить обзор");
-      setRealFeed(payload);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Не удалось обновить обзор");
-    } finally { setInsightBusy(false); }
   }
 
   async function requestNewsReport(newsId: string, refresh = false) {
@@ -701,7 +687,6 @@ export function RealMode({
         </div>
 
         <div className="secondary-grid">
-          <InsightPanel feed={realFeed} busy={insightBusy} onRefresh={() => void refreshInsightNow()} onSelect={selectNews} />
           <MarketsPanel markets={realMarkets} histories={marketHistories} historyBusy={marketHistoryBusy} onToggle={(category, instrument) => void toggleMarketHistory(category, instrument)} />
         </div>
       </main>
