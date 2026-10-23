@@ -281,7 +281,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
           </> : <p className="hint">Сбор ещё не запускался.</p>}
         </> : <button type="button" onClick={() => void refreshNewsStatus()}>Загрузить состояние</button>}
       </section>
-      <form className="card settings-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+      <section className="card settings-form">
         <h2>Курсы, акции и металлы</h2>
         <p className="hint">Единый источник: Московская биржа, API ISS. Бесплатные данные могут поступать с задержкой и не подходят для торговых решений.</p>
         <fieldset>
@@ -303,9 +303,8 @@ export function Settings({ onBack }: { onBack: () => void }) {
             {[1, 3, 6, 12, 24].map((hours) => <option key={hours} value={hours}>Каждые {hours} ч.</option>)}
           </select>
         </label>
-        <button type="submit" disabled={busy}>{busy ? "Сохраняем…" : "Применить настройки"}</button>
-      </form>
-      <form className="card settings-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+      </section>
+      <section className="card settings-form">
         <h2>Обзор компании</h2>
         <p className="hint">Сохранённый обзор собирается из уже оценённых новостей и рыночных данных, без отдельного вызова модели. Повторный вход использует сохранённый результат.</p>
         <label>Обновление обзора
