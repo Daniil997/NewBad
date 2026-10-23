@@ -167,6 +167,42 @@ def test_profile_chat_ignores_numbered_list_markers_but_rejects_unsupported_numb
     assert answer_profile_chat("Как это повлияет?", [], evidence) is None
 
 
+
+def test_profile_chat_retries_answer_with_unsupported_numbers(monkeypatch):
+    calls: list[list[dict]] = []
+    replies = [
+        {
+            "answer": "Расходы вырастут на 14 процентов.",
+            "evidence_ids": ["company-profile", "news:item"],
+        },
+        {
+            "answer": "В материале описаны изменения тарифов. Оценка: они могут повлиять на расходы компании.",
+            "evidence_ids": ["company-profile", "news:item"],
+        },
+    ]
+
+    def fake(messages, *, tier, max_tokens, **_route_options):
+        del tier, max_tokens
+        calls.append(messages.copy())
+        return TierResult(
+            route=_ROUTE,
+            text=json.dumps(replies[min(len(calls) - 1, len(replies) - 1)], ensure_ascii=False),
+            tokens=1,
+        )
+
+    monkeypatch.setattr("app.agent.generate.complete_tier", fake)
+    evidence = [
+        {"evidence_id": "company-profile", "text": "Компания оказывает услуги связи."},
+        {"evidence_id": "news:item", "text": "В материале описаны изменения тарифов."},
+    ]
+
+    result = answer_profile_chat("Как это повлияет?", [], evidence)
+
+    assert result is not None
+    assert result["answer"].startswith("В материале описаны изменения тарифов.")
+    assert len(calls) == 2
+    assert any("не прошёл проверку фактов" in message["content"] for message in calls[1])
+
 def test_mock_provider_does_not_call_the_model(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("LLM_MODE", "mock")
