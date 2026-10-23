@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, SecretStr, field_validator
 
 from app.agent.chat import ChatReply, answer_from_card
+from app.agent.failure import failure_detail
 from app.agent.generate import analyze_profile_news, answer_profile_chat
 from app.agent.loop import build_card
 from app.agent.pasted import remember_pasted
@@ -789,7 +790,10 @@ def create_profile_news_report(news_id: str, payload: ProfileNewsReportRequest, 
         return {**report_data, "created_at": cached["created_at"], "cached": True, "citations": citations}
     report = analyze_profile_news(saved["profile"], news)
     if report is None:
-        raise HTTPException(status_code=503, detail="Модель не смогла сформировать проверяемый разбор. Попробуйте позже или проверьте настройки модели.")
+        raise HTTPException(status_code=503, detail=failure_detail(
+            "Модель не смогла сформировать проверяемый разбор. Попробуйте позже или проверьте настройки модели.",
+            "Попробуйте обновить разбор позже.",
+        ))
     now = now_utc()
     with connect_app() as connection:
         connection.execute(
@@ -940,7 +944,10 @@ def send_profile_chat_message(session_id: str, payload: ProfileChatMessage, requ
     history = [{"role": row["role"], "content": row["text"]} for row in reversed(rows)]
     result = answer_profile_chat(payload.question.strip(), history, evidence)
     if result is None:
-        raise HTTPException(status_code=503, detail="Модель не смогла подготовить ответ по подтверждённым материалам. Попробуйте переформулировать вопрос или проверить доступность модели.")
+        raise HTTPException(status_code=503, detail=failure_detail(
+            "Модель не смогла подготовить ответ по подтверждённым материалам. Попробуйте переформулировать вопрос или проверить доступность модели.",
+            "Попробуйте переформулировать вопрос.",
+        ))
     by_id = {item["evidence_id"]: item for item in evidence}
     citations = [
         {"title": by_id[item_id]["title"], "url": by_id[item_id]["url"],
