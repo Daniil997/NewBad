@@ -79,6 +79,11 @@ def complete(
     }
     if chosen == "cloud":
         payload["response_format"] = {"type": "json_object"}
+    elif "11434" in base:
+        # Ollama's thinking models may spend the output budget on reasoning and
+        # return an empty message.content, which this client correctly rejects.
+        # We need the final answer for JSON parsing and user-facing responses.
+        payload["think"] = False
     if options:
         payload["options"] = options
     started = time.perf_counter()
