@@ -16,8 +16,8 @@ SITE_SCAN_COOLDOWN = timedelta(minutes=5)
 SITE_SCAN_STALE_AFTER = timedelta(minutes=10)
 DEFAULT_DEVELOPER_SETTINGS = {
     "task_routes": {
-        "real": {"profile_site": "inherit", "news_report": "inherit", "chat": "inherit"},
-        "demo": {"news_card": "inherit", "chat": "inherit"},
+        "real": {"profile_site": "mock", "news_report": "mock", "chat": "mock"},
+        "demo": {"news_card": "mock", "chat": "mock"},
     },
     "news_lookback_days": 3,
     "news_retention_days": 90,
@@ -376,7 +376,13 @@ def developer_settings() -> dict:
         stored = {}
     merged = {**DEFAULT_DEVELOPER_SETTINGS, **stored}
     merged["task_routes"] = {
-        space: {**DEFAULT_DEVELOPER_SETTINGS["task_routes"][space], **(stored.get("task_routes", {}).get(space) or {})}
+        space: {
+            task: ("mock" if route == "inherit" else route)
+            for task, route in {
+                **DEFAULT_DEVELOPER_SETTINGS["task_routes"][space],
+                **(stored.get("task_routes", {}).get(space) or {}),
+            }.items()
+        }
         for space in DEFAULT_DEVELOPER_SETTINGS["task_routes"]
     }
     return merged
