@@ -161,7 +161,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
       }
       setSettings(payload);
       await Promise.all([refreshNewsStatus(), refreshMarketStatus()]);
-      setSaved("Сохранено. Общий режим, разрешение облака и размещение действуют в текущем процессе до перезапуска; маршруты задач и параметры сбора/хранения применяются без перезапуска.");
+      setSaved("Сохранено. Маршруты задач и параметры сбора/хранения применяются без перезапуска; общий режим сервера не изменялся.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Нет ответа от API");
     } finally {
@@ -213,25 +213,9 @@ export function Settings({ onBack }: { onBack: () => void }) {
       <p className="hint">Изменения в разных разделах сохраняются одной кнопкой «Сохранить все настройки». Сбор новостей и рыночных данных запускается отдельно кнопками «Собрать сейчас».</p>
       {error ? <p className="error">{error}</p> : null}
       <form className="card settings-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-        <label>Общий режим модели по умолчанию
-          <select value={mode} onChange={(event) => setMode(event.target.value)}>
-            {MODES.map((item) => <option key={item} value={item}>{MODE_LABELS[item]}</option>)}
-          </select>
-        </label>
-        <p className="hint">{MODE_DESCRIPTIONS[mode] || "Общий режим используется там, где не задан отдельный маршрут задачи."} Отдельные маршруты ниже могут переопределять его.</p>
-        <label className="check">
-          <input type="checkbox" checked={allowCloud} onChange={(event) => setAllowCloud(event.target.checked)} />
-          Разрешить облачные вызовы (нужно для режимов hybrid/cloud_only и облачных маршрутов задач).
-        </label>
-        <label>Размещение локальной модели в Ollama
-          <select value={placement} onChange={(event) => setPlacement(event.target.value)}>
-            {PLACEMENTS.map((item) => <option key={item} value={item}>{item === "auto" ? "auto — по свободной памяти" : item === "gpu" ? "gpu — целиком на видеокарте" : "ram — часть модели в оперативной памяти"}</option>)}
-          </select>
-        </label>
-        <p className="hint">Этот выбор применяется к локальному серверу Ollama (адрес обычно содержит порт 11434). Для llama-server на порту 8080 размещение задаётся при запуске; изменение здесь его не перезапускает.</p>
-        {(mode === "hybrid" || mode === "cloud_only" || Object.values(taskRoutes).some((routes) => Object.values(routes).some((route) => route.startsWith("cloud_")))) && !allowCloud ? <p className="error">Выбран облачный режим или облачный маршрут задачи, но облачные вызовы запрещены. Включите разрешение облака или измените выбор модели.</p> : null}
+        <p className="hint">Выбор модели задаётся отдельно для каждой задачи в разделе ниже. Для совместимости серверные значения по умолчанию сохраняются без изменения, но здесь больше не настраиваются.</p>
         <h2>Модели по задачам и режимам</h2>
-        <p className="hint">Можно выбрать только модель из разрешённого списка. Облачные варианты работают лишь при включённом облаке и настроенном ключе на сервере. Ключ здесь не вводится и в браузер не передаётся. «Общий режим» использует переключатель выше.</p>
+        <p className="hint">Можно выбрать только модель из разрешённого списка. Облачные варианты работают лишь при включённом облаке и настроенном ключе на сервере. Ключ здесь не вводится и в браузер не передаётся. «Общий режим» использует серверный режим по умолчанию.</p>
         <fieldset>
           <legend>Реальный режим</legend>
           {([["profile_site", "Изучение сайта компании"], ["news_report", "Подробный разбор новости"], ["chat", "Чат по профилю"]] as const).map(([task, label]) => <label key={task}>{label}
