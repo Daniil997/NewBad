@@ -477,7 +477,12 @@ async def _analysis_worker() -> None:
             imported = await asyncio.to_thread(load_news)
             by_id = {item.id: item for item in imported if item.status == "imported"}
             candidate_items = [by_id[news_id] for news_id in job["candidate_ids"] if news_id in by_id]
-            model_results = await asyncio.to_thread(select_profile_news, profile, candidate_items)
+            model_results = {}
+            for offset in range(0, len(candidate_items), 30):
+                batch = candidate_items[offset:offset + 30]
+                ranked = await asyncio.to_thread(select_profile_news, profile, batch)
+                if ranked:
+                    model_results.update(ranked)
             await asyncio.to_thread(save_job_results, job, profile, by_id, model_results)
         except Exception as error:
             await asyncio.to_thread(fail_job, job["id"], error.__class__.__name__)
