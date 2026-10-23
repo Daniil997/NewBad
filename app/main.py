@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import re
 import hashlib
@@ -81,6 +82,8 @@ from app.llm.placement import decide, placement_label
 from app.llm.router import current_route, local_status, resolve_route
 from app.agent.tools import find_news
 from app.tracing.journal import latest_steps, read_trace
+
+logger = logging.getLogger(__name__)
 
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$")
 _QUERY_LIMIT = 300
@@ -780,6 +783,12 @@ def create_profile_news_report(news_id: str, payload: ProfileNewsReportRequest, 
         raise HTTPException(status_code=404, detail="Новость отсутствует в актуальном официальном окне")
     news_hash = article_hash(news)
     report_version = "profile-news-report-v1"
+    task_route = resolve_route("heavy", task="news_report", space="real")
+    logger.info(
+        "news_report_start news_id=%s profile_id=%s refresh=%s task_route_mode=%s task_route_provider=%s task_route_model=%s task_route_reason=%s",
+        news_id, saved["profile_id"], payload.refresh, task_route.mode, task_route.provider,
+        task_route.model, task_route.reason,
+    )
     with connect_app() as connection:
         cached = connection.execute(
             "SELECT report_json, created_at FROM profile_news_reports WHERE profile_id = ? AND profile_version = ? "
@@ -787,6 +796,7 @@ def create_profile_news_report(news_id: str, payload: ProfileNewsReportRequest, 
             (saved["profile_id"], saved["profile_version"], news.id, news_hash, report_version),
         ).fetchone()
     if cached and not payload.refresh:
+        logger.info("news_report_cache_hit news_id=%s profile_id=%s", news_id, saved["profile_id"])
         report_data = json.loads(cached["report_json"])
         citations = ([{"title": news.title, "url": news.url, "published_at": news.published_at, "kind": "news"}]
                      if f"news:{news.id}" in report_data.get("evidence_ids", []) else [])
@@ -795,10 +805,21 @@ def create_profile_news_report(news_id: str, payload: ProfileNewsReportRequest, 
         return {**report_data, "created_at": cached["created_at"], "cached": True, "citations": citations}
     report = analyze_profile_news(saved["profile"], news)
     if report is None:
+        logger.error(
+            "news_report_failed news_id=%s profile_id=%s reason=%s",
+            news_id, saved["profile_id"], failure_detail(
+                "Модель не смогла сформировать проверяемый разбор. Попробуйте позже или проверьте настройки модели.",
+                "Попробуйте обновить разбор позже.",
+            ),
+        )
         raise HTTPException(status_code=503, detail=failure_detail(
             "Модель не смогла сформировать проверяемый разбор. Попробуйте позже или проверьте настройки модели.",
             "Попробуйте обновить разбор позже.",
         ))
+    logger.info(
+        "news_report_success news_id=%s profile_id=%s evidence_count=%s question_count=%s",
+        news_id, saved["profile_id"], len(report.get("evidence_ids", [])), len(report.get("questions", [])),
+    )
     now = now_utc()
     with connect_app() as connection:
         connection.execute(
