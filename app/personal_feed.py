@@ -7,7 +7,14 @@ from datetime import datetime, timedelta, timezone
 
 from app.user_store import connect_app, init_app_db, now_utc
 
-SCORING_VERSION = "real-llm-v2"
+BASE_SCORING_VERSION = "real-llm-v2"
+
+
+def scoring_version() -> str:
+    from app.user_store import developer_settings
+
+    selection = developer_settings().get("task_routes", {}).get("real", {}).get("news_selection", "mock")
+    return f"{BASE_scoring_version()}:{selection}"
 TOPIC_EVENT_MAP = {
     "rates_inflation": {"monetary_policy", "inflation_macro", "macro", "bonds"},
     "exchange_rates": {"fx", "sanctions_trade"},
@@ -110,7 +117,7 @@ def missing_candidates(profile_id: str, profile_version: int, items: list) -> li
     with connect_app() as connection:
         rows = connection.execute(
             "SELECT news_id, news_hash FROM profile_news_analysis WHERE profile_id = ? AND profile_version = ? AND scoring_version = ?",
-            (profile_id, profile_version, SCORING_VERSION),
+            (profile_id, profile_version, scoring_version()),
         ).fetchall()
         existing = {(row["news_id"], row["news_hash"]) for row in rows}
         active = connection.execute(
@@ -175,7 +182,7 @@ def save_job_results(job: dict, profile: dict, items_by_id: dict, model_results:
                 """INSERT OR IGNORE INTO profile_news_analysis
                 (profile_id, profile_version, news_id, news_hash, scoring_version, relevant, score, reasons_json, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (job["profile_id"], job["profile_version"], item.id, article_hash(item), SCORING_VERSION,
+                (job["profile_id"], job["profile_version"], item.id, article_hash(item), scoring_version(),
                  int(result["relevant"]), result["score"], json.dumps(result, ensure_ascii=False), created),
             )
         connection.execute(
@@ -217,7 +224,7 @@ def analysis_results(profile_id: str, profile_version: int) -> dict[str, dict]:
         rows = connection.execute(
             """SELECT news_id, news_hash, relevant, score, reasons_json, created_at FROM profile_news_analysis
             WHERE profile_id = ? AND profile_version = ? AND scoring_version = ? ORDER BY created_at DESC""",
-            (profile_id, profile_version, SCORING_VERSION),
+            (profile_id, profile_version, scoring_version()),
         ).fetchall()
         job = connection.execute(
             "SELECT status, created_at, updated_at, error, candidate_ids_json FROM profile_analysis_jobs WHERE profile_id = ? AND profile_version = ? ORDER BY created_at DESC LIMIT 1",
