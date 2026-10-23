@@ -44,9 +44,8 @@ def current_route() -> Route:
 
 def resolve_route(tier: str = "light", *, task: str | None = None, space: str = "demo") -> Route:
     if task:
-        selection = developer_settings().get("task_routes", {}).get(space, {}).get(task, "inherit")
-        if selection != "inherit":
-            return _task_route(selection)
+        selection = developer_settings().get("task_routes", {}).get(space, {}).get(task, "mock")
+        return _task_route("mock" if selection == "inherit" else selection)
     mode = _mode_name()
     if _is_replay(mode):
         model = _first_model(mode, tier)
@@ -87,9 +86,8 @@ def choose_tools(planned: list[str]) -> PlanChoice:
 
 def complete_tier(messages: list[dict[str, str]], *, tier: str, max_tokens: int, task: str | None = None, space: str = "demo") -> TierResult:
     if task:
-        configured = developer_settings().get("task_routes", {}).get(space, {}).get(task, "inherit")
-        if configured != "inherit":
-            return _complete_task_route(messages, configured, max_tokens)
+        configured = developer_settings().get("task_routes", {}).get(space, {}).get(task, "mock")
+        return _complete_task_route(messages, "mock" if configured == "inherit" else configured, max_tokens)
     mode = _mode_name()
     if _is_replay(mode):
         return _from_cache(messages, tier)
