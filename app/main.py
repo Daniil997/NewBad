@@ -78,7 +78,7 @@ from app.profile.site_extract import SiteExtractionError, extract_profile_sugges
 from app.schemas.card import Card
 from app.scoring.feed import Feed, build_feed
 from app.llm.placement import decide, placement_label
-from app.llm.router import current_route, known_modes, local_status, resolve_route
+from app.llm.router import current_route, local_status, resolve_route
 from app.agent.tools import find_news
 from app.tracing.journal import latest_steps, read_trace
 
