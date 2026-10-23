@@ -473,4 +473,6 @@ def _grounded(text: str, source: str) -> bool:
 
 
 def _numbers(text: str) -> set[str]:
+    # Numbered-list prefixes are formatting, not factual numeric claims.
+    text = re.sub(r"(?m)^[ \\t]{0,3}[1-9][.)][ \\t]+", "", text)
     return {match.group(0).replace(",", ".") for match in _NUMBER.finditer(text)}
