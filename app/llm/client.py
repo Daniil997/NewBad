@@ -118,7 +118,7 @@ def complete(
     )
     if _content_logging_enabled():
         logger.info(
-            "llm_prompt provider=%s mode=%s model=%s messages:\\n%s",
+            "llm_prompt provider=%s mode=%s model=%s messages:\n%s",
             chosen, mode, model, json.dumps(messages, ensure_ascii=False, indent=2),
         )
     try:
@@ -172,7 +172,7 @@ def complete(
         raise LLMError("модель вернула некорректный ответ") from None
     if _content_logging_enabled():
         logger.info(
-            "llm_response provider=%s mode=%s model=%s endpoint=%s content:\\n%s",
+            "llm_response provider=%s mode=%s model=%s endpoint=%s content:\n%s",
             chosen, mode, model, url.split("?", 1)[0], text if isinstance(text, str) else repr(text),
         )
     if not isinstance(text, str) or not text.strip():
