@@ -31,10 +31,14 @@ const MARKET_CATEGORY_LABELS: Record<string, string> = { currencies: "Валют
 
 const TASK_ROUTE_OPTIONS = [
   ["mock", "Заглушка (без вызова модели)"],
-  ["local_gemma", "Локально: Gemma"], ["local_qwen", "Локально: Qwen"],
-  ["cloud_gemma", "Облако: Gemma"], ["cloud_glm", "Облако: GLM Flash"],
-  ["cloud_qwen", "Облако: Qwen"], ["cloud_deepseek", "Облако: DeepSeek Flash"],
-  ["cloud_vl", "Облако: Qwen VL"], ["cloud_kimi", "Облако: Kimi"],
+  ["local_gemma", "Локально: Gemma (локальный псевдоним)"],
+  ["local_qwen", "Локально: Qwen (локальный псевдоним)"],
+  ["cloud_gemma", "Облако: google/gemma-4-26b-a4b-it"],
+  ["cloud_glm", "Облако: z-ai/glm-5.3-flash"],
+  ["cloud_qwen", "Облако: qwen/qwen3.6-35b-a3b"],
+  ["cloud_deepseek", "Облако: deepseek/deepseek-v4.1-flash"],
+  ["cloud_vl", "Облако: qwen/qwen3-vl-30b-a3b-instruct"],
+  ["cloud_kimi", "Облако: moonshotai/kimi-k2.6"],
 ] as const;
 
 export function Settings({ onBack }: { onBack: () => void }) {
