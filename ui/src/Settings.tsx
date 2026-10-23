@@ -37,7 +37,6 @@ const TASK_ROUTE_OPTIONS = [
 ] as const;
 
 export function Settings({ onBack }: { onBack: () => void }) {
-  const [settings, setSettings] = useState<SettingsView | null>(null);
   const [newsLookbackDays, setNewsLookbackDays] = useState(3);
   const [newsRetentionDays, setNewsRetentionDays] = useState(90);
   const [newsMaxItems, setNewsMaxItems] = useState(500);
@@ -83,7 +82,6 @@ export function Settings({ onBack }: { onBack: () => void }) {
         return response.json() as Promise<SettingsView>;
       })
       .then((payload) => {
-        setSettings(payload);
         setNewsLookbackDays(payload.news_lookback_days);
         setNewsRetentionDays(payload.news_retention_days);
         setNewsMaxItems(payload.news_max_items);
@@ -138,7 +136,6 @@ export function Settings({ onBack }: { onBack: () => void }) {
         setError(payload?.detail || `Настройки: ${response.status}`);
         return;
       }
-      setSettings(payload);
       await Promise.all([refreshNewsStatus(), refreshMarketStatus()]);
       setSaved("Сохранено. Маршруты задач и параметры сбора/хранения применены. Глобальные настройки модели этим запросом не изменяются.");
     } catch (reason) {
