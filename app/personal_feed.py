@@ -14,7 +14,7 @@ def scoring_version() -> str:
     from app.user_store import developer_settings
 
     selection = developer_settings().get("task_routes", {}).get("real", {}).get("news_selection", "mock")
-    return f"{BASE_scoring_version()}:{selection}"
+    return f"{BASE_SCORING_VERSION}:{selection}"
 TOPIC_EVENT_MAP = {
     "rates_inflation": {"monetary_policy", "inflation_macro", "macro", "bonds"},
     "exchange_rates": {"fx", "sanctions_trade"},
