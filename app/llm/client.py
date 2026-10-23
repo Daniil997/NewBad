@@ -111,12 +111,16 @@ def complete(
         url = f"{base}/chat/completions"
     timeout = _timeout(chosen, options)
     started = time.perf_counter()
-    # Log request metadata only: never log prompts, response text, or credentials.
     logger.info(
         "llm_request_start provider=%s mode=%s model=%s endpoint=%s max_tokens=%s timeout_s=%s options_keys=%s",
         chosen, mode, model, url.split("?", 1)[0], payload["max_tokens"], timeout,
         sorted(options) if options else [],
     )
+    if _content_logging_enabled():
+        logger.info(
+            "llm_prompt provider=%s mode=%s model=%s messages:\\n%s",
+            chosen, mode, model, json.dumps(messages, ensure_ascii=False, indent=2),
+        )
     try:
         body = post_chat(url, request_payload, timeout, headers)
     except httpx.TimeoutException:
@@ -166,6 +170,11 @@ def complete(
             sorted(body.keys()) if isinstance(body, dict) else [],
         )
         raise LLMError("модель вернула некорректный ответ") from None
+    if _content_logging_enabled():
+        logger.info(
+            "llm_response provider=%s mode=%s model=%s endpoint=%s content:\\n%s",
+            chosen, mode, model, url.split("?", 1)[0], text if isinstance(text, str) else repr(text),
+        )
     if not isinstance(text, str) or not text.strip():
         logger.warning(
             "llm_request_failed category=empty_content provider=%s mode=%s model=%s endpoint=%s elapsed_ms=%s finish_reason=%s usage=%s message_keys=%s content_type=%s content_length=%s",
@@ -221,6 +230,14 @@ def server_reachable() -> bool:
     if "11434" in root:
         return _status_ok(f"{root}/api/version")
     return False
+
+
+def _content_logging_enabled() -> bool:
+    """Log full prompts and generated text in development, unless explicitly disabled."""
+    configured = os.environ.get("LLM_LOG_CONTENT")
+    if configured is not None:
+        return configured.strip().lower() in {"1", "true", "yes", "on"}
+    return os.environ.get("APP_ENV", "development").strip().lower() != "production"
 
 
 def _provider(mode: str, provider: str | None) -> str:
