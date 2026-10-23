@@ -52,9 +52,6 @@ const TASK_ROUTE_OPTIONS = [
 
 export function Settings({ onBack }: { onBack: () => void }) {
   const [settings, setSettings] = useState<SettingsView | null>(null);
-  const [mode, setMode] = useState("mock");
-  const [allowCloud, setAllowCloud] = useState(false);
-  const [placement, setPlacement] = useState("auto");
   const [newsLookbackDays, setNewsLookbackDays] = useState(3);
   const [newsRetentionDays, setNewsRetentionDays] = useState(90);
   const [newsMaxItems, setNewsMaxItems] = useState(500);
@@ -101,9 +98,6 @@ export function Settings({ onBack }: { onBack: () => void }) {
       })
       .then((payload) => {
         setSettings(payload);
-        setMode(payload.mode);
-        setAllowCloud(payload.allow_cloud);
-        setPlacement(payload.placement_choice || "auto");
         setNewsLookbackDays(payload.news_lookback_days);
         setNewsRetentionDays(payload.news_retention_days);
         setNewsMaxItems(payload.news_max_items);
@@ -136,7 +130,6 @@ export function Settings({ onBack }: { onBack: () => void }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode, allow_cloud: allowCloud, placement,
           news_lookback_days: newsLookbackDays,
           news_retention_days: newsRetentionDays,
           news_max_items: newsMaxItems,
@@ -161,7 +154,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
       }
       setSettings(payload);
       await Promise.all([refreshNewsStatus(), refreshMarketStatus()]);
-      setSaved("Сохранено. Маршруты задач и параметры сбора/хранения применяются без перезапуска; общий режим сервера не изменялся.");
+      setSaved("Сохранено. Маршруты задач и параметры сбора/хранения применены. Глобальные настройки модели этим запросом не изменяются.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Нет ответа от API");
     } finally {
@@ -215,7 +208,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
       <form className="card settings-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
         <p className="hint">Выбор модели задаётся отдельно для каждой задачи в разделе ниже. Для совместимости серверные значения по умолчанию сохраняются без изменения, но здесь больше не настраиваются.</p>
         <h2>Модели по задачам и режимам</h2>
-        <p className="hint">Можно выбрать только модель из разрешённого списка. Облачные варианты работают лишь при включённом облаке и настроенном ключе на сервере. Ключ здесь не вводится и в браузер не передаётся. «Общий режим» использует серверный режим по умолчанию.</p>
+        <p className="hint">Можно выбрать только модель из разрешённого списка. Облачные варианты работают лишь при включённом облаке и настроенном ключе на сервере. Ключ здесь не вводится и в браузер не передаётся. «Общий режим» использует режим по умолчанию, заданный на сервере; индивидуальные маршруты ниже переопределяют его.</p>
         <fieldset>
           <legend>Реальный режим</legend>
           {([["profile_site", "Изучение сайта компании"], ["news_report", "Подробный разбор новости"], ["chat", "Чат по профилю"]] as const).map(([task, label]) => <label key={task}>{label}
