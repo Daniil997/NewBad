@@ -15,6 +15,7 @@ RATE_LIMIT = 10
 SITE_SCAN_COOLDOWN = timedelta(minutes=5)
 SITE_SCAN_STALE_AFTER = timedelta(minutes=10)
 DEFAULT_DEVELOPER_SETTINGS = {
+    "validate_numeric_grounding": True,
     "task_routes": {
         "real": {"profile_site": "mock", "news_report": "mock", "news_selection": "mock", "chat": "mock"},
         "demo": {"news_card": "mock", "chat": "mock"},
