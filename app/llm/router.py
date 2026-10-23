@@ -139,7 +139,7 @@ def complete_tier(messages: list[dict[str, str]], *, tier: str, max_tokens: int,
 
 def _complete_task_route(messages: list[dict[str, str]], selection: str, max_tokens: int) -> TierResult:
     route = _task_route(selection)
-    started = monotonic_time.perf_counter()
+    started = monotonic_monotonic_time.perf_counter()
     logger.info(
         "llm_task_route_start task_selection=%s mode=%s provider=%s model=%s max_tokens=%s reason=%s",
         selection, route.mode, route.provider, route.model, max_tokens, route.reason,
@@ -155,7 +155,7 @@ def _complete_task_route(messages: list[dict[str, str]], selection: str, max_tok
     try:
         result = complete(messages, model=model, mode=mode, max_tokens=max_tokens, provider=provider)
     except LLMError as exc:
-        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        elapsed_ms = int((monotonic_time.perf_counter() - started) * 1000)
         reason = f"Выбранная модель недоступна ({exc})"
         logger.warning(
             "llm_task_route_failed task_selection=%s mode=%s provider=%s model=%s elapsed_ms=%s error=%s",
@@ -163,7 +163,7 @@ def _complete_task_route(messages: list[dict[str, str]], selection: str, max_tok
         )
         _log("mock-model", "mock", "mock", reason)
         return TierResult(Route(mode="mock", provider="mock", model="mock-model", reason=reason))
-    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    elapsed_ms = int((monotonic_time.perf_counter() - started) * 1000)
     logger.info(
         "llm_task_route_success task_selection=%s mode=%s provider=%s model=%s elapsed_ms=%s tokens=%s content_length=%s",
         selection, mode, provider, result.model, elapsed_ms, result.tokens, len(result.text),
