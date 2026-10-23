@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import time
@@ -10,6 +11,8 @@ from app.db import ROOT
 from app.llm.placement import request_options
 from app.llm.registry import api_model, require_allowed
 from app.tracing.journal import log_llm_call
+
+logger = logging.getLogger(__name__)
 
 _CLOUD_MODES = frozenset({"cloud_only", "hybrid"})
 _PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
@@ -86,25 +89,61 @@ def complete(
         payload["think"] = False
     if options:
         payload["options"] = options
+    url = f"{base}/chat/completions"
+    timeout = _timeout(chosen, options)
     started = time.perf_counter()
+    # Log request metadata only: never log prompts, response text, or credentials.
+    logger.info(
+        "llm_request_start provider=%s mode=%s model=%s endpoint=%s max_tokens=%s timeout_s=%s options_keys=%s",
+        chosen, mode, model, url.split("?", 1)[0], payload["max_tokens"], timeout,
+        sorted(options) if options else [],
+    )
     try:
-        body = post_chat(f"{base}/chat/completions", payload, _timeout(chosen, options), headers)
+        body = post_chat(url, payload, timeout, headers)
     except httpx.TimeoutException:
+        logger.warning("llm_request_failed category=timeout provider=%s mode=%s model=%s endpoint=%s elapsed_ms=%s timeout_s=%s",
+                       chosen, mode, model, url.split("?", 1)[0], int((time.perf_counter() - started) * 1000), timeout)
         raise LLMError("истекло время ожидания модели") from None
     except httpx.HTTPStatusError as exc:
+        logger.warning("llm_request_failed category=http_status provider=%s mode=%s model=%s endpoint=%s status_code=%s elapsed_ms=%s",
+                       chosen, mode, model, url.split("?", 1)[0], exc.response.status_code,
+                       int((time.perf_counter() - started) * 1000))
         raise LLMError(_status_message(exc.response.status_code, chosen)) from None
-    except httpx.HTTPError:
+    except httpx.HTTPError as exc:
+        logger.warning("llm_request_failed category=transport provider=%s mode=%s model=%s endpoint=%s error_type=%s elapsed_ms=%s",
+                       chosen, mode, model, url.split("?", 1)[0], type(exc).__name__,
+                       int((time.perf_counter() - started) * 1000))
         raise LLMError("сервер модели недоступен") from None
     except json.JSONDecodeError:
+        logger.warning("llm_request_failed category=invalid_json provider=%s mode=%s model=%s endpoint=%s elapsed_ms=%s",
+                       chosen, mode, model, url.split("?", 1)[0], int((time.perf_counter() - started) * 1000))
         raise LLMError("модель вернула некорректный ответ") from None
+    latency_ms = int((time.perf_counter() - started) * 1000)
     try:
-        text = body["choices"][0]["message"]["content"]
+        choices = body["choices"]
+        first = choices[0]
+        message = first["message"]
+        text = message["content"]
         tokens = int((body.get("usage") or {}).get("total_tokens") or 0)
-    except (KeyError, IndexError, TypeError, ValueError):
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        logger.warning(
+            "llm_request_failed category=invalid_response_shape provider=%s mode=%s model=%s endpoint=%s elapsed_ms=%s body_type=%s top_level_keys=%s",
+            chosen, mode, model, url.split("?", 1)[0], latency_ms, type(body).__name__,
+            sorted(body.keys()) if isinstance(body, dict) else [],
+        )
         raise LLMError("модель вернула некорректный ответ") from None
     if not isinstance(text, str) or not text.strip():
+        logger.warning(
+            "llm_request_failed category=empty_content provider=%s mode=%s model=%s endpoint=%s elapsed_ms=%s finish_reason=%s usage=%s message_keys=%s content_type=%s content_length=%s",
+            chosen, mode, model, url.split("?", 1)[0], latency_ms, first.get("finish_reason"),
+            body.get("usage"), sorted(message.keys()) if isinstance(message, dict) else [],
+            type(text).__name__, len(text) if isinstance(text, str) else -1,
+        )
         raise LLMError("модель вернула некорректный ответ")
-    latency_ms = int((time.perf_counter() - started) * 1000)
+    logger.info(
+        "llm_request_success provider=%s mode=%s model=%s endpoint=%s elapsed_ms=%s tokens=%s content_length=%s finish_reason=%s",
+        chosen, mode, model, url.split("?", 1)[0], latency_ms, tokens, len(text), first.get("finish_reason"),
+    )
     log_llm_call(model, chosen, mode, tokens=tokens, latency_ms=latency_ms, switch_reason=reason)
     return Completion(text=text, tokens=tokens, model=model, provider=chosen, mode=mode)
 
