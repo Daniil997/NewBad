@@ -30,7 +30,7 @@ def test_same_conditions_select_the_same_model(monkeypatch):
     assert resolve_route("light").provider == "local"
 
 
-def test_task_route_can_override_global_mode_for_a_real_task(monkeypatch, tmp_path):
+def test_task_route_is_independent_of_global_mode_for_a_real_task(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("LLM_MODE", "mock")
     monkeypatch.setenv("ALLOW_CLOUD", "false")
@@ -48,6 +48,21 @@ def test_task_route_can_override_global_mode_for_a_real_task(monkeypatch, tmp_pa
                             task="news_report", space="real")
     assert seen == [("gemma-4-26b-a4b", "local_only", "local")]
     assert outcome.route.provider == "local"
+
+
+def test_missing_task_route_uses_mock_instead_of_global_mode(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LLM_MODE", "cloud_only")
+    monkeypatch.setenv("ALLOW_CLOUD", "true")
+    monkeypatch.setenv("CASE_LLM_API_KEY", "test-secret")
+    monkeypatch.setattr("app.llm.router.developer_settings", lambda: {"task_routes": {}})
+    route = resolve_route("heavy", task="news_card", space="demo")
+    assert route.provider == "mock"
+    assert route.model == "mock-model"
+    outcome = complete_tier([{"role": "user", "content": "task"}], tier="heavy", max_tokens=20,
+                            task="news_card", space="demo")
+    assert outcome.route.provider == "mock"
+    assert outcome.text is None
 
 
 def test_task_cloud_route_respects_global_cloud_permission(monkeypatch, tmp_path):
