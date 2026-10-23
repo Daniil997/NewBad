@@ -7,7 +7,7 @@ import {
   type SavedProfile, type SiteSuggestion, type User,
 } from "./realTypes";
 import {
-  ChatPanel, MarketsPanel, NewsDetail, NewsList, ProfileForm, SuggestionsPanel,
+  ChatPanel, CurrencyRatesPanel, isCurrencyRatesNews, MarketsPanel, NewsDetail, NewsList, ProfileForm, SuggestionsPanel,
 } from "./RealParts";
 
 export function RealMode({
@@ -442,7 +442,9 @@ export function RealMode({
   /* ───── производные данные для ленты ───── */
 
   const allItems = realFeed?.items ?? [];
-  const feedItems = allItems.filter((item) => {
+  const currencyRatesItem = allItems.find(isCurrencyRatesNews) ?? null;
+  const newsItems = allItems.filter((item) => !isCurrencyRatesNews(item));
+  const feedItems = newsItems.filter((item) => {
     if (feedTab === "personal" && !item.analysis?.relevant) return false;
     if (feedCategory !== "all" && item.event_type !== feedCategory) return false;
     const today = new Date();
@@ -454,9 +456,9 @@ export function RealMode({
     const query = feedQuery.trim().toLocaleLowerCase("ru-RU");
     return !query || `${item.title} ${item.excerpt} ${item.source}`.toLocaleLowerCase("ru-RU").includes(query);
   });
-  const feedCategories = [...new Map(allItems.filter((item) => item.event_type !== "unknown").map((item) => [item.event_type, item.event_title])).entries()];
-  const personalCount = allItems.filter((item) => item.analysis?.relevant).length;
-  const selectedItem = allItems.find((item) => item.id === selectedNewsId) ?? feedItems[0] ?? null;
+  const feedCategories = [...new Map(newsItems.filter((item) => item.event_type !== "unknown").map((item) => [item.event_type, item.event_title])).entries()];
+  const personalCount = newsItems.filter((item) => item.analysis?.relevant).length;
+  const selectedItem = newsItems.find((item) => item.id === selectedNewsId) ?? feedItems[0] ?? null;
   const analysisRunning = Boolean(realFeed?.job && ["queued", "running"].includes(realFeed.job.status));
   const filtersActive = feedCategory !== "all" || feedPeriod !== "window";
   const profileComplete = profileMeta?.status === "complete";
@@ -688,6 +690,7 @@ export function RealMode({
 
         <div className="secondary-grid">
           <MarketsPanel markets={realMarkets} histories={marketHistories} historyBusy={marketHistoryBusy} onToggle={(category, instrument) => void toggleMarketHistory(category, instrument)} />
+          {currencyRatesItem ? <CurrencyRatesPanel item={currencyRatesItem} /> : <section className="card side-card currency-rates"><h2>Курсы валют</h2><p className="empty">Данные курсов валют пока не загружены.</p></section>}
         </div>
       </main>
     </div>
