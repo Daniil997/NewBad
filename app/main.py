@@ -325,9 +325,10 @@ class SettingsView(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    mode: str = Field(min_length=1, max_length=40)
-    allow_cloud: bool
-    placement: str = Field(min_length=1, max_length=20)
+    # Legacy global model controls are optional: the current UI configures per-task routes.
+    mode: str | None = Field(default=None, min_length=1, max_length=40)
+    allow_cloud: bool | None = None
+    placement: str | None = Field(default=None, min_length=1, max_length=20)
     news_lookback_days: int = Field(default=3, ge=1, le=30)
     news_retention_days: int = Field(default=90, ge=1, le=3650)
     news_max_items: int = Field(default=500, ge=10, le=10000)
@@ -1392,11 +1393,17 @@ def paste_news(client_id: str, body: PasteNews) -> Card:
 @app.post("/api/settings")
 def update_settings(body: SettingsUpdate) -> SettingsView:
     """Переключает режим текущего процесса. Файл .env и ключ не меняются."""
-    if body.mode not in known_modes() or body.placement not in _PLACEMENTS:
-        raise HTTPException(status_code=400, detail="Некорректные настройки")
-    os.environ["LLM_MODE"] = body.mode
-    os.environ["ALLOW_CLOUD"] = "true" if body.allow_cloud else "false"
-    os.environ["LLM_PLACEMENT"] = body.placement
+    if body.mode is not None and body.mode not in known_modes():
+        raise HTTPException(status_code=400, detail="Некорректный общий режим модели")
+    if body.placement is not None and body.placement not in _PLACEMENTS:
+        raise HTTPException(status_code=400, detail="Некорректное размещение модели")
+    # Omitted legacy fields must not reset server defaults when the UI saves task routes.
+    if body.mode is not None:
+        os.environ["LLM_MODE"] = body.mode
+    if body.allow_cloud is not None:
+        os.environ["ALLOW_CLOUD"] = "true" if body.allow_cloud else "false"
+    if body.placement is not None:
+        os.environ["LLM_PLACEMENT"] = body.placement
     saved = save_developer_settings({
         "task_routes": body.task_routes,
         "news_lookback_days": body.news_lookback_days,
