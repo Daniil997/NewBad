@@ -12,13 +12,11 @@ def test_news_developer_settings_persist_and_validate(monkeypatch, tmp_path):
     with TestClient(app) as client:
         defaults = client.get("/api/settings")
         saved = client.post("/api/settings", json={
-            "mode": "mock", "allow_cloud": False, "placement": "auto",
             "news_lookback_days": 7, "news_retention_days": 45,
             "news_max_items": 120, "news_collection_interval_hours": 6,
         })
         loaded = client.get("/api/settings")
         invalid = client.post("/api/settings", json={
-            "mode": "mock", "allow_cloud": False, "placement": "auto",
             "news_lookback_days": 90, "news_retention_days": 45,
             "news_max_items": 120, "news_collection_interval_hours": 6,
         })
@@ -34,7 +32,7 @@ def test_news_developer_settings_persist_and_validate(monkeypatch, tmp_path):
 def test_task_model_settings_round_trip_and_reject_unknown_models(monkeypatch, tmp_path):
     monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "task-routes.sqlite3"))
     routes = {
-        "real": {"profile_site": "local_gemma", "news_report": "cloud_gemma", "chat": "inherit"},
+        "real": {"profile_site": "local_gemma", "news_report": "cloud_gemma", "chat": "mock"},
         "demo": {"news_card": "mock", "chat": "local_qwen"},
     }
     with TestClient(app) as client:
@@ -43,7 +41,6 @@ def test_task_model_settings_round_trip_and_reject_unknown_models(monkeypatch, t
         })
         loaded = client.get("/api/settings")
         invalid = client.post("/api/settings", json={
-            "mode": "mock", "allow_cloud": False, "placement": "auto",
             "task_routes": {"real": {"news_report": "gpt-4"}},
         })
     assert saved.status_code == 200
@@ -58,8 +55,8 @@ def test_task_route_save_does_not_require_or_reset_legacy_global_model_settings(
     monkeypatch.setenv("ALLOW_CLOUD", "true")
     monkeypatch.setenv("LLM_PLACEMENT", "gpu")
     routes = {
-        "real": {"profile_site": "local_gemma", "news_report": "inherit", "chat": "mock"},
-        "demo": {"news_card": "local_qwen", "chat": "inherit"},
+        "real": {"profile_site": "local_gemma", "news_report": "mock", "chat": "mock"},
+        "demo": {"news_card": "local_qwen", "chat": "mock"},
     }
 
     with TestClient(app) as client:
