@@ -90,7 +90,25 @@ def complete(
         payload["reasoning_effort"] = "none"
     if options:
         payload["options"] = options
-    url = f"{base}/chat/completions"
+
+    # Ollama's OpenAI-compatible endpoint can ignore the `think` flag for
+    # some thinking models. Use its native API so `think: false` is honored.
+    ollama_native = chosen != "cloud" and "11434" in base
+    if ollama_native:
+        native_options = {"temperature": 0.2, "num_predict": payload["max_tokens"]}
+        if options:
+            native_options.update(options)
+        request_payload = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "think": False,
+            "options": native_options,
+        }
+        url = f"{base.removesuffix('/v1')}/api/chat"
+    else:
+        request_payload = payload
+        url = f"{base}/chat/completions"
     timeout = _timeout(chosen, options)
     started = time.perf_counter()
     # Log request metadata only: never log prompts, response text, or credentials.
@@ -100,7 +118,7 @@ def complete(
         sorted(options) if options else [],
     )
     try:
-        body = post_chat(url, payload, timeout, headers)
+        body = post_chat(url, request_payload, timeout, headers)
     except httpx.TimeoutException:
         logger.warning("llm_request_failed category=timeout provider=%s mode=%s model=%s endpoint=%s elapsed_ms=%s timeout_s=%s",
                        chosen, mode, model, url.split("?", 1)[0], int((time.perf_counter() - started) * 1000), timeout)
@@ -121,11 +139,26 @@ def complete(
         raise LLMError("модель вернула некорректный ответ") from None
     latency_ms = int((time.perf_counter() - started) * 1000)
     try:
-        choices = body["choices"]
-        first = choices[0]
-        message = first["message"]
-        text = message["content"]
-        tokens = int((body.get("usage") or {}).get("total_tokens") or 0)
+        if ollama_native:
+            message = body["message"]
+            text = message["content"]
+            first = {"finish_reason": body.get("done_reason")}
+            native_usage = body.get("usage") or {}
+            tokens = int(native_usage.get("prompt_eval_count", 0) or 0) + int(
+                native_usage.get("eval_count", 0) or 0
+            )
+            usage = {
+                "prompt_tokens": native_usage.get("prompt_eval_count", 0),
+                "completion_tokens": native_usage.get("eval_count", 0),
+                "total_tokens": tokens,
+            }
+        else:
+            choices = body["choices"]
+            first = choices[0]
+            message = first["message"]
+            text = message["content"]
+            usage = body.get("usage") or {}
+            tokens = int(usage.get("total_tokens") or 0)
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         logger.warning(
             "llm_request_failed category=invalid_response_shape provider=%s mode=%s model=%s endpoint=%s elapsed_ms=%s body_type=%s top_level_keys=%s",
@@ -137,7 +170,7 @@ def complete(
         logger.warning(
             "llm_request_failed category=empty_content provider=%s mode=%s model=%s endpoint=%s elapsed_ms=%s finish_reason=%s usage=%s message_keys=%s content_type=%s content_length=%s",
             chosen, mode, model, url.split("?", 1)[0], latency_ms, first.get("finish_reason"),
-            body.get("usage"), sorted(message.keys()) if isinstance(message, dict) else [],
+            usage, sorted(message.keys()) if isinstance(message, dict) else [],
             type(text).__name__, len(text) if isinstance(text, str) else -1,
         )
         raise LLMError("модель вернула некорректный ответ")
