@@ -134,7 +134,7 @@ def answer_with_model(question: str, card_text: str, evidence: list[dict] | None
 
 
 def answer_profile_chat(question: str, history: list[dict[str, str]], evidence: list[dict]) -> dict | None:
-    """Answer a real user's profile chat using only the supplied, citeable evidence."""
+    """Answer profile chat and retry when the numeric-grounding check fails."""
     packet = evidence[:12]
     allowed = _index(packet)
     messages = [
@@ -150,7 +150,7 @@ def answer_profile_chat(question: str, history: list[dict[str, str]], evidence: 
                 "Затем дай оценку для этой компании по профилю: через клиентов, подрядчиков, инфраструктуру, "
                 "страхование, регулирование, спрос или затраты. Явно назови эту часть оценкой, а не фактом публикации. "
                 "Если связь слабая, объясни почему именно для этого профиля. Не выдумывай цифры, цитаты и факты, "
-                "которых нет в evidence. Верни JSON {\"answer\":\"...\",\"evidence_ids\":[...]} и включи ID профиля "
+                "которых нет в evidence. Верни JSON {\\"answer\\":\\"...\\",\\"evidence_ids\\":[...]} и включи ID профиля "
                 "и ID новости, которые использованы."
             ),
         },
@@ -158,28 +158,68 @@ def answer_profile_chat(question: str, history: list[dict[str, str]], evidence: 
     ]
     messages.extend(history[-8:])
     messages.append({"role": "user", "content": question})
-    payload, route, _tokens = _ask(messages, token_limit("answer"), task="chat", space="real")
-    if payload is None:
+
+    # Первый ответ плюс не более двух попыток исправления чисел.
+    max_numeric_retries = 2
+    for attempt in range(max_numeric_retries + 1):
+        payload, route, _tokens = _ask(
+            messages, token_limit("answer"), task="chat", space="real"
+        )
+        if payload is None or not isinstance(payload, dict):
+            if attempt < max_numeric_retries:
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Предыдущий ответ не удалось разобрать как JSON. Исправь его и верни только корректный JSON "
+                        "{\\"answer\\":\\"...\\",\\"evidence_ids\\":[...]}."
+                    ),
+                })
+                logger.warning("llm_chat_retry attempt=%s reason=invalid_json", attempt + 1)
+                continue
+            if payload is not None:
+                _reject(route, "ответ модели не JSON-объект")
+            return None
+
+        answer = str(payload.get("answer") or "").strip()
+        ids = _known_ids(payload.get("evidence_ids"), allowed)
+        reason = None
+        if not answer:
+            reason = "в ответе модели нет текста"
+        elif ids is None:
+            reason = "модель сослалась на несуществующие материалы"
+        elif not ids:
+            reason = "модель не указала, на каких материалах основан ответ"
+        else:
+            corpus = _cited_text(ids, allowed)
+            if not _grounded(answer, corpus):
+                reason = "в ответе есть числа, которых нет в указанных материалах"
+
+        if reason is None:
+            return {"answer": answer, "evidence_ids": ids}
+
+        # Числовая проверка остаётся строгой: просим модель переписать ответ,
+        # не добавляя числа и используя только переданные источники.
+        if reason == "в ответе есть числа, которых нет в указанных материалах" and attempt < max_numeric_retries:
+            messages.append({
+                "role": "assistant",
+                "content": json.dumps(payload, ensure_ascii=False),
+            })
+            messages.append({
+                "role": "user",
+                "content": (
+                    "Твой предыдущий ответ не прошёл проверку фактов: в нём есть числа, которых нет в выбранных "
+                    "материалах. Перепиши ответ без неподтверждённых чисел и утверждений. Сохрани полезную оценку "
+                    "для компании, но обозначай выводы как оценку. Используй только известные evidence_ids из "
+                    "исходных материалов. Верни только JSON {\\"answer\\":\\"...\\",\\"evidence_ids\\":[...]}."
+                ),
+            })
+            logger.warning("llm_chat_retry attempt=%s reason=numeric_validation", attempt + 1)
+            continue
+
+        _reject(route, reason)
         return None
-    if not isinstance(payload, dict):
-        _reject(route, "ответ модели не JSON-объект")
-        return None
-    answer = str(payload.get("answer") or "").strip()
-    ids = _known_ids(payload.get("evidence_ids"), allowed)
-    if not answer:
-        _reject(route, "в ответе модели нет текста")
-        return None
-    if ids is None:
-        _reject(route, "модель сослалась на несуществующие материалы")
-        return None
-    if not ids:
-        _reject(route, "модель не указала, на каких материалах основан ответ")
-        return None
-    corpus = _cited_text(ids, allowed)
-    if not _grounded(answer, corpus):
-        _reject(route, "в ответе есть числа, которых нет в указанных материалах")
-        return None
-    return {"answer": answer, "evidence_ids": ids}
+
+    return None
 
 
 def analyze_profile_news(profile: dict, news: NewsItem) -> dict | None:
