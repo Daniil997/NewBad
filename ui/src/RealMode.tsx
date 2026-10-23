@@ -1,139 +1,14 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import "./real.css";
 import { ModeSwitch, type AppMode } from "./ModeSwitch";
-
-type User = { id: string; login: string; created_at: string };
-type Interest = "interested" | "not_relevant" | "unknown";
-type BusinessProfile = {
-  company_name: string; website: string; country: string; region: string; city: string;
-  description: string; description_skipped: boolean; industry: string; okved: string; industry_tags: string[];
-  products_services: string; customer_types: string; business_model: string;
-  size_band: string; business_stage: string; credit_interest: Interest;
-  deposit_interest: Interest; currency_interest: Interest; export_import_interest: Interest;
-  leasing_interest: Interest; guarantees_interest: Interest; factoring_interest: Interest;
-  settlements_interest: Interest; market_geographies: string[]; dependencies: string;
-  focus_topics: string[]; external_factors: string; context_note: string; language: "ru" | "en";
-};
-type SavedProfile = BusinessProfile & { profile_version: number; status: "incomplete" | "complete"; updated_at: string };
-type TagOption = { id: string; label: string; description: string };
-type ProfileOptions = { industry_tags: TagOption[]; focus_topics: TagOption[] };
-type SiteSuggestion = {
-  field_name: string; value: string | string[]; evidence: string; source_url: string;
-  source_title: string; extracted_at: string; confidence: number;
-};
-type RealNewsItem = {
-  id: string; title: string; published_at: string; excerpt: string; event_type: string;
-  event_title: string; source: string; url: string;
-  analysis: null | { relevant: boolean; score: number; reasons: string[]; method: string; analyzed_at: string };
-  report: null | { summary: string; relevance: string; risks: string; opportunities: string; questions: string[]; evidence_ids: string[]; citations: ChatCitation[]; created_at: string };
-};
-type RealFeed = {
-  items: RealNewsItem[]; insight: RealNewsItem[]; profile_version: number;
-  insight_markets: { category: string; instrument: string; title: string; price: number; change_pct: number | null; currency: string; source_url: string; source_timestamp: string; reason: string }[];
-  insight_updated_at: string | null; insight_status: string; insight_stale: boolean; insight_refresh_mode: string;
-  lookback_days: number; analysis_method: string; analyzed_count: number;
-  pending_count: number; job: null | { status: string; updated_at: string; error: string };
-  trigger: string; personalization_available: boolean;
-};
-type RealMarkets = {
-  provider: string; delayed: boolean; latest: null | { status: string; finished_at: string };
-  snapshot: { stored_count: number; items: { category: string; instrument: string; name: string; price: number; change_pct: number | null; currency: string; source_url: string; source_timestamp: string; observed_at: string; profile_reason: string }[] };
-};
-type MarketHistory = {
-  items: { price: number; currency: string; source_timestamp: string; observed_at: string; source_url: string }[];
-  change_over_period_pct: number | null;
-};
-type ChatCitation = { title: string; url: string; published_at: string; kind: string };
-type ChatMessage = { role: "user" | "assistant"; text: string; citations: ChatCitation[]; created_at: string };
-
-function ProfileChatScreen({ sessionId, csrf, companyName, onBack }: {
-  sessionId: string; csrf: string; companyName: string; onBack: () => void;
-}) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [question, setQuestion] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [title, setTitle] = useState("Общий чат по бизнесу");
-  const [focused, setFocused] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    void fetch(`/api/real/chat/sessions/${encodeURIComponent(sessionId)}`).then(async (response) => {
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "Не удалось открыть диалог");
-      if (!cancelled) {
-        setMessages(data.messages as ChatMessage[]);
-        setTitle(data.title || "Общий чат по бизнесу");
-        setFocused(Boolean(data.focused_news_id));
-      }
-    }).catch((reason: unknown) => {
-      if (!cancelled) setError(reason instanceof Error ? reason.message : "Не удалось загрузить диалог");
-    });
-    return () => { cancelled = true; };
-  }, [sessionId]);
-  async function send(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const text = question.trim();
-    if (!text || busy) return;
-    setBusy(true); setError("");
-    try {
-      const response = await fetch(`/api/real/chat/sessions/${encodeURIComponent(sessionId)}/messages`, {
-        method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
-        body: JSON.stringify({ question: text }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "Не удалось получить ответ");
-      setMessages((current) => [...current, { role: "user", text, citations: [], created_at: data.created_at }, data as ChatMessage]);
-      setQuestion("");
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Не удалось связаться с чатом");
-    } finally { setBusy(false); }
-  }
-  return <section className="card profile-chat-page">
-    <button className="linkish" type="button" onClick={onBack}>← К новостям</button>
-    <p className="legend">Чат по профилю компании</p>
-    <h2>{title}</h2>
-    <p className="hint">Контекст компании: {companyName || "профиль пока не заполнен"}. Можно задавать общие вопросы по бизнесу и новостям; выбранная статья {focused ? "добавлена как основной материал диалога" : "не закреплена, доступны свежие официальные материалы"}.</p>
-    <div className="profile-chat-messages" aria-live="polite">
-      {messages.length ? messages.map((message, index) => <article className={`profile-chat-message ${message.role}`} key={`${message.created_at}-${index}`}>
-        <strong>{message.role === "user" ? "Вы" : "Помощник"}</strong>
-        <p>{message.text}</p>
-        {message.citations.length ? <div className="profile-chat-citations"><small>Материалы:</small><ul>{message.citations.map((citation, citationIndex) => <li key={`${citation.url}-${citationIndex}`}>
-          {citation.url ? <a href={citation.url} target="_blank" rel="noreferrer">{citation.title}</a> : <span>{citation.title} (данные профиля)</span>}{citation.published_at ? <small> · {citation.published_at}</small> : null}
-        </li>)}</ul></div> : null}
-      </article>) : <p className="hint">Начните с вопроса о том, как новости и рыночные события могут быть связаны с вашим профилем.</p>}
-    </div>
-    {error ? <p className="error" role="alert">{error}</p> : null}
-    <form className="profile-chat-form" onSubmit={(event) => void send(event)}>
-      <label htmlFor="profile-chat-question">Ваш вопрос</label>
-      <textarea id="profile-chat-question" rows={3} maxLength={2000} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Например: какие из свежих новостей могут затронуть наши поставки?" />
-      <button type="submit" disabled={busy || !question.trim()}>{busy ? "Готовим ответ…" : "Отправить"}</button>
-    </form>
-    <p className="hint">Ответ отделяет факт публикации от оценки для вашей компании. Внизу показаны использованные материалы. При недоступности модели сообщение не сохраняется.</p>
-  </section>;
-}
-
-const PROFILE_FIELD_LABELS: Record<string, string> = {
-  company_name: "Название компании", country: "Страна", region: "Регион", city: "Город",
-  description: "Описание бизнеса", industry: "Основная деятельность", industry_tags: "Отраслевые теги",
-  products_services: "Товары и услуги", customer_types: "Тип клиентов", business_model: "Модель бизнеса",
-};
-
-const EMPTY_PROFILE: BusinessProfile = {
-  company_name: "", website: "", country: "", region: "", city: "", description: "",
-  description_skipped: false, industry: "", okved: "", industry_tags: [], products_services: "", customer_types: "",
-  business_model: "", size_band: "", business_stage: "", credit_interest: "unknown",
-  deposit_interest: "unknown", currency_interest: "unknown", export_import_interest: "unknown",
-  leasing_interest: "unknown", guarantees_interest: "unknown", factoring_interest: "unknown",
-  settlements_interest: "unknown", market_geographies: [], dependencies: "", focus_topics: [],
-  external_factors: "", context_note: "", language: "ru",
-};
-
-function profilePayload(source: BusinessProfile): BusinessProfile {
-  const payload = { ...EMPTY_PROFILE };
-  (Object.keys(EMPTY_PROFILE) as (keyof BusinessProfile)[]).forEach((key) => {
-    payload[key] = source[key];
-  });
-  return payload;
-}
+import {
+  EMPTY_PROFILE, PROFILE_FIELD_LABELS, profilePayload,
+  type BusinessProfile, type MarketHistory, type ProfileOptions, type RealFeed, type RealMarkets,
+  type SavedProfile, type SiteSuggestion, type User,
+} from "./realTypes";
+import {
+  ChatPanel, InsightPanel, MarketsPanel, NewsDetail, NewsList, ProfileForm, SuggestionsPanel,
+} from "./RealParts";
 
 export function RealMode({
   mode,
@@ -150,6 +25,7 @@ export function RealMode({
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -174,11 +50,13 @@ export function RealMode({
   const [feedPeriod, setFeedPeriod] = useState("window");
   const [feedBusy, setFeedBusy] = useState(false);
   const [feedRefreshKey, setFeedRefreshKey] = useState(0);
+  const [selectedNewsId, setSelectedNewsId] = useState("");
   const [activeChatId, setActiveChatId] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const [insightBusy, setInsightBusy] = useState(false);
   const [newsReportBusy, setNewsReportBusy] = useState("");
-  const [openNewsReports, setOpenNewsReports] = useState<string[]>([]);
+  const detailRef = useRef<HTMLElement | null>(null);
+  const tabInitialized = useRef(false);
 
   async function refreshCsrf(): Promise<string> {
     const response = await fetch("/api/auth/csrf");
@@ -232,6 +110,20 @@ export function RealMode({
     void refresh();
     return () => { disposed = true; if (timer !== undefined) window.clearTimeout(timer); };
   }, [user?.id, profileMeta?.profile_version, editingProfile, feedRefreshKey]);
+
+  // Пока профиль не заполнен, персональная вкладка пуста — открываем «Все новости» один раз.
+  useEffect(() => {
+    if (realFeed && !tabInitialized.current) {
+      tabInitialized.current = true;
+      if (!realFeed.personalization_available) setFeedTab("all");
+    }
+  }, [realFeed]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 10000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   async function loadProfile(): Promise<void> {
     const [response, optionsResponse, suggestionsResponse] = await Promise.all([
@@ -317,6 +209,7 @@ export function RealMode({
       if (!response.ok) throw new Error("Не удалось завершить сессию");
       setUser(null);
       setActiveChatId("");
+      setSelectedNewsId("");
       setProfile(EMPTY_PROFILE);
       setProfileMeta(null);
       setRealFeed(null);
@@ -327,6 +220,18 @@ export function RealMode({
     } finally {
       setBusy(false);
     }
+  }
+
+  function scrollToDetail() {
+    if (window.matchMedia("(max-width: 860px)").matches) {
+      window.setTimeout(() => detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+    }
+  }
+
+  function selectNews(id: string) {
+    setSelectedNewsId(id);
+    setActiveChatId("");
+    scrollToDetail();
   }
 
   async function openProfileChat(newsId?: string) {
@@ -340,6 +245,7 @@ export function RealMode({
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Не удалось открыть чат");
       setActiveChatId(data.id as string);
+      scrollToDetail();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось открыть чат");
     } finally { setChatBusy(false); }
@@ -392,7 +298,6 @@ export function RealMode({
       setRealFeed((current) => current ? {
         ...current, items: current.items.map((item) => item.id === newsId ? { ...item, report: data } : item),
       } : current);
-      setOpenNewsReports((current) => current.includes(newsId) ? current : [...current, newsId]);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось получить разбор новости");
     } finally { setNewsReportBusy(""); }
@@ -437,10 +342,13 @@ export function RealMode({
       setProfile({ ...EMPTY_PROFILE, ...payload.profile });
       setProfileMeta(payload.profile);
       setProfileDirty(false);
-      setEditingProfile(payload.profile.status !== "complete");
-      setNotice(payload.profile.status === "complete" ? "Профиль сохранён." : "Черновик профиля сохранён.");
+      const complete = payload.profile.status === "complete";
+      setEditingProfile(!complete);
+      setNotice(complete ? "Профиль сохранён. Подборка новостей обновится под вашу компанию." : "Черновик профиля сохранён. Заполните название и описание, чтобы завершить профиль.");
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось сохранить профиль");
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
       setProfileBusy(false);
     }
@@ -545,11 +453,10 @@ export function RealMode({
     updateProfile(key, checked ? [...current, id] : current.filter((item) => item !== id));
   }
 
-  function updateGeographies(value: string) {
-    updateProfile("market_geographies", value.split(",").map((item) => item.trim()).filter(Boolean));
-  }
+  /* ───── производные данные для ленты ───── */
 
-  const feedItems = (realFeed?.items ?? []).filter((item) => {
+  const allItems = realFeed?.items ?? [];
+  const feedItems = allItems.filter((item) => {
     if (feedTab === "personal" && !item.analysis?.relevant) return false;
     if (feedCategory !== "all" && item.event_type !== feedCategory) return false;
     const today = new Date();
@@ -561,304 +468,242 @@ export function RealMode({
     const query = feedQuery.trim().toLocaleLowerCase("ru-RU");
     return !query || `${item.title} ${item.excerpt} ${item.source}`.toLocaleLowerCase("ru-RU").includes(query);
   });
-  const feedCategories = [...new Map((realFeed?.items ?? []).filter((item) => item.event_type !== "unknown").map((item) => [item.event_type, item.event_title])).entries()];
+  const feedCategories = [...new Map(allItems.filter((item) => item.event_type !== "unknown").map((item) => [item.event_type, item.event_title])).entries()];
+  const personalCount = allItems.filter((item) => item.analysis?.relevant).length;
+  const selectedItem = allItems.find((item) => item.id === selectedNewsId) ?? feedItems[0] ?? null;
+  const analysisRunning = Boolean(realFeed?.job && ["queued", "running"].includes(realFeed.job.status));
+  const filtersActive = feedCategory !== "all" || feedPeriod !== "window";
+  const profileComplete = profileMeta?.status === "complete";
 
-  return (
-    <div className="bank">
-      <header className="bank-bar">
-        <div className="bank-brand">
-          <strong>Альфа-Бизнес</strong>
-          <span>интернет-банк</span>
+  /* ───── общие куски разметки ───── */
+
+  const header = (
+    <header className="bank-bar">
+      <button className="bar-button" type="button" onClick={onHome}>Альфа-Бизнес</button>
+      <ModeSwitch mode={mode} onChange={onModeChange} />
+      {user ? (
+        <div className="bar-user">
+          <span>{user.login}</span>
+          <button className="bar-button bar-small" type="button" onClick={() => void logout()} disabled={busy || profileBusy}>
+            {busy ? "Выходим…" : "Выйти"}
+          </button>
         </div>
-        <ModeSwitch mode={mode} onChange={onModeChange} />
-      </header>
-      <main className="bank-main narrow">
-        <button className="linkish" type="button" onClick={onHome}>На главную</button>
-        <h1>{user ? activeChatId ? "Чат по бизнесу" : "Реальный режим" : registering ? "Регистрация" : "Вход"}</h1>
-        {!ready ? <p>Проверяем сессию…</p> : null}
-        {user ? (
-          <>
-            <section className="card">
-              <h2>Здравствуйте, {user.login}</h2>
-              {profileMeta ? (
-                <p className="hint">
-                  {profileMeta.status === "complete" ? "Профиль заполнен" : "Профиль заполнен частично"}
-                  {` · версия ${profileMeta.profile_version}`}
-                </p>
-              ) : null}
-              {notice ? <p role="status">{notice}</p> : null}
-              {error ? <p className="error" role="alert">{error}</p> : null}
-              <button className="auth-action" type="button" onClick={() => void logout()} disabled={busy || profileBusy}>
-                {busy ? "Завершаем…" : "Выйти"}
+      ) : null}
+    </header>
+  );
+
+  const banners = (
+    <div className="banners">
+      {error ? (
+        <div className="banner banner-error" role="alert">
+          <span>{error}</span>
+          <button type="button" aria-label="Закрыть сообщение" onClick={() => setError("")}>×</button>
+        </div>
+      ) : null}
+      {notice ? (
+        <div className="banner banner-ok" role="status">
+          <span>{notice}</span>
+          <button type="button" aria-label="Закрыть сообщение" onClick={() => setNotice("")}>×</button>
+        </div>
+      ) : null}
+    </div>
+  );
+
+  /* ───── вход / регистрация ───── */
+
+  if (!user) {
+    return (
+      <div className="bank real">
+        {header}
+        <main className="bank-main narrow">
+          {!ready ? <p className="hint">Проверяем сессию…</p> : (
+            <section className="card auth-card">
+              <p className="eyebrow">Что важно для вашей компании</p>
+              <h1>{registering ? "Создайте аккаунт" : "Вход"}</h1>
+              <p className="lead">
+                {registering
+                  ? "Заполните профиль компании — и лента новостей станет персональной."
+                  : "Войдите, чтобы увидеть новости, важные именно для вашего бизнеса."}
+              </p>
+              <form className="auth-form-real" onSubmit={(event) => void submit(event)}>
+                <label className="field">
+                  <span className="field-label">Логин</span>
+                  <input className="input" autoComplete="username" minLength={3} maxLength={64} value={login} onChange={(event) => setLogin(event.target.value)} required />
+                  {registering ? <small className="field-hint">От 3 символов</small> : null}
+                </label>
+                <label className="field">
+                  <span className="field-label">Пароль</span>
+                  <input className="input" type={showPassword ? "text" : "password"} autoComplete={registering ? "new-password" : "current-password"} minLength={10} maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} required />
+                  {registering ? <small className="field-hint">От 10 символов</small> : null}
+                </label>
+                {registering ? (
+                  <label className="field">
+                    <span className="field-label">Повторите пароль</span>
+                    <input className="input" type={showPassword ? "text" : "password"} autoComplete="new-password" minLength={10} maxLength={128} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required />
+                  </label>
+                ) : null}
+                <label className="check"><input type="checkbox" checked={showPassword} onChange={(event) => setShowPassword(event.target.checked)} /><span>Показать пароль</span></label>
+                {banners}
+                <button type="submit" className="btn btn-primary wide" disabled={busy || !csrf}>
+                  {busy ? "Подождите…" : registering ? "Зарегистрироваться" : "Войти"}
+                </button>
+              </form>
+              <p className="hint small">Локальная регистрация прототипа. Восстановление пароля пока не подключено.</p>
+              <button className="btn-link" type="button" onClick={() => {
+                setRegistering((current) => !current);
+                setPassword("");
+                setConfirmPassword("");
+                setError("");
+                setNotice("");
+              }}>
+                {registering ? "Уже есть аккаунт? Войти" : "Нет аккаунта? Зарегистрироваться"}
               </button>
             </section>
-            {activeChatId ? <ProfileChatScreen sessionId={activeChatId} csrf={csrf} companyName={profile.company_name} onBack={() => setActiveChatId("")} /> : <>
-            {siteSuggestions.length || siteWarnings.length ? (
-              <section className="card site-suggestions">
-                <h2>Проверьте найденные данные</h2>
-                <p className="hint">Это предложения модели, они не попадают в профиль без вашего подтверждения.</p>
-                {siteWarnings.map((warning, index) => <p className="site-warning" key={`${index}-${warning}`}>{warning}</p>)}
-                {siteSuggestions.map((suggestion) => (
-                  <article className="site-suggestion" key={`${suggestion.field_name}:${suggestion.source_url}`}>
-                    <h3>{PROFILE_FIELD_LABELS[suggestion.field_name] ?? suggestion.field_name}</h3>
-                    <p><strong>Предложение:</strong> {suggestionLabel(suggestion.field_name, suggestion.value)}</p>
-                    <blockquote>{suggestion.evidence}</blockquote>
-                    <p>
-                      <a href={suggestion.source_url} target="_blank" rel="noreferrer">
-                        {suggestion.source_title || "Страница-источник"}
-                      </a>
-                      {` · оценка модели: ${suggestion.confidence >= 0.8 ? "высокая" : "средняя"} (не гарантия точности)`}
-                    </p>
-                    <div className="site-suggestion-actions">
-                      <button type="button" onClick={() => void decideSuggestion(suggestion, true)} disabled={siteBusy || profileDirty}>
-                        Подтвердить
-                      </button>
-                      <button type="button" className="secondary" onClick={() => void decideSuggestion(suggestion, false)} disabled={siteBusy || profileDirty}>
-                        Отклонить
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </section>
-            ) : null}
-            {!editingProfile ? (
-              <>
-                <div className="profile-toolbar">
-                  <button type="button" className="auth-action" onClick={() => setEditingProfile(true)}>Настроить профиль компании</button>
-                  <button type="button" className="auth-action" onClick={() => void openProfileChat()} disabled={chatBusy}>{chatBusy ? "Открываем чат…" : "Обсудить новости и бизнес"}</button>
-                </div>
-                <section className="card">
-                  <h2>Важные новости</h2>
-                  <div className="feed-tabs" role="tablist" aria-label="Режим новостной ленты">
-                    <button type="button" role="tab" aria-selected={feedTab === "personal"} onClick={() => setFeedTab("personal")}>Для вас</button>
-                    <button type="button" role="tab" aria-selected={feedTab === "all"} onClick={() => setFeedTab("all")}>Все новости</button>
-                  </div>
-                  {realFeed ? <p className="hint">Окно: последние {realFeed.lookback_days} дн. · обработано {realFeed.analyzed_count} · метод: {realFeed.analysis_method}</p> : <p>Загружаем ленту…</p>}
-                  {realFeed?.job?.status === "queued" || realFeed?.job?.status === "running" ? <p role="status">Анализ новостей выполняется · в очереди {realFeed.pending_count}</p> : null}
-                  {realFeed && realFeed.pending_count > 0 && !["queued", "running"].includes(realFeed.job?.status ?? "") ? <p role="status">Есть новые материалы ({realFeed.pending_count}). Нажмите «Обновить подборку», чтобы увидеть связь с вашей компанией.</p> : null}
-                  {realFeed?.job?.status === "failed" ? <p className="error">Последняя задача анализа завершилась с ошибкой. Можно запустить её вручную.</p> : null}
-                  <div className="feed-filters">
-                    <label>Поиск<input value={feedQuery} onChange={(event) => setFeedQuery(event.target.value)} placeholder="Тема, слово или источник" /></label>
-                    <label>Категория<select value={feedCategory} onChange={(event) => setFeedCategory(event.target.value)}>
-                      <option value="all">Все категории</option>
-                      {feedCategories.map(([category, title]) => <option key={category} value={category}>{title}</option>)}
-                    </select></label>
-                    <label>Период<select value={feedPeriod} onChange={(event) => setFeedPeriod(event.target.value)}>
-                      <option value="window">Окно настроек ({realFeed?.lookback_days ?? 3} дн.)</option>
-                      <option value="day">Сегодня (по дате публикации)</option>
-                      <option value="three_days">3 календарных дня</option>
-                    </select></label>
-                  </div>
-                  <button type="button" onClick={() => void analyzeNewsNow()} disabled={feedBusy || Boolean(realFeed?.job && ["queued", "running"].includes(realFeed.job.status))}>
-                    {feedBusy ? "Ставим в очередь…" : "Обновить подборку"}
-                  </button>
-                  {feedTab === "personal" ? <p className="hint">В подборке показаны только свежие новости, которым правила нашли объяснимую связь с профилем. «Все новости» не запускает анализ.</p> : null}
-                  {feedItems.length ? <div className="real-news-list">
-                    {feedItems.map((item) => <article className="real-news-item" id={`real-news-${item.id}`} key={item.id}>
-                      <p className="eyebrow">{item.event_title} · {item.published_at}</p>
-                      <h3><a href={item.url} target="_blank" rel="noreferrer">{item.title}</a></h3>
-                      <p className="hint">{item.source}</p>
-                      <p>{item.excerpt}</p>
-                      {item.analysis ? <div className="analysis-reasons">
-                        <p><strong>{item.analysis.method}</strong> · связь с профилем {Math.round(item.analysis.score * 100)}%</p>
-                        <ul>{item.analysis.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-                        <small>Оценка создана {new Date(item.analysis.analyzed_at).toLocaleString("ru-RU")}</small>
-                      </div> : feedTab === "all" ? <p className="hint">Ещё не оценивалась для профиля. Просмотр «Все новости» не запускает анализ.</p> : null}
-                      <div className="news-report-controls">
-                        <button type="button" className="secondary" onClick={() => item.report ? setOpenNewsReports((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id]) : void requestNewsReport(item.id)} disabled={newsReportBusy === item.id}>
-                          {newsReportBusy === item.id ? "Готовим разбор…" : item.report ? openNewsReports.includes(item.id) ? "Скрыть подробный разбор" : "Показать подробный разбор" : "Подробно разобрать для бизнеса"}
-                        </button>
-                        {item.report && openNewsReports.includes(item.id) ? <div className="news-report">
-                          <p className="hint">Сохранено {new Date(item.report.created_at).toLocaleString("ru-RU")}. При повторном открытии используется этот результат.</p>
-                          <p><strong>Кратко:</strong> {item.report.summary}</p><p><strong>Связь с профилем:</strong> {item.report.relevance}</p>
-                          <p><strong>Риски:</strong> {item.report.risks}</p><p><strong>Возможности:</strong> {item.report.opportunities}</p>
-                          {item.report.questions.length ? <ul>{item.report.questions.map((question) => <li key={question}>{question}</li>)}</ul> : null}
-                          {item.report.citations.length ? <p><small>Основание: {item.report.citations.map((citation, index) => <span key={`${citation.url}-${index}`}>{index ? " · " : ""}{citation.url ? <a href={citation.url} target="_blank" rel="noreferrer">{citation.title}</a> : citation.title}{citation.published_at ? ` (${citation.published_at})` : ""}</span>)}</small></p> : null}
-                          <button type="button" className="linkish" onClick={() => void requestNewsReport(item.id, true)} disabled={newsReportBusy === item.id}>{newsReportBusy === item.id ? "Обновляем…" : "Обновить разбор"}</button>
-                        </div> : null}
-                      </div>
-                      <button type="button" className="secondary" onClick={() => void openProfileChat(item.id)} disabled={chatBusy}>Обсудить эту новость</button>
-                    </article>)}
-                  </div> : <p>{feedTab === "personal" ? "Пока нет новостей с подтверждённой связью с профилем." : "За выбранное окно нет сохранённых новостей из подключённых источников."}</p>}
-                </section>
-                <section className="card insight">
-                  <p className="legend">Обзор компании</p>
-                  <h2>Что сейчас важно для вашего бизнеса</h2>
-                  <p className="hint">{realFeed?.insight_status ?? "Загружаем сохранённый обзор…"}{realFeed?.insight_updated_at ? ` · сохранён ${new Date(realFeed.insight_updated_at).toLocaleString("ru-RU")}` : ""}</p>
-                  {realFeed?.insight.length ? <>
-                    <p className="hint">Краткий обзор собран из уже сохранённых оценок и рыночных наблюдений. Новых вызовов модели нет.</p>
-                    <ul>{realFeed.insight.map((item) => <li key={item.id}><a href={`#real-news-${item.id}`}>{item.title}</a><br /><small>{item.analysis?.reasons[0]}</small></li>)}</ul>
-                  </> : <p>{realFeed?.job && ["queued", "running"].includes(realFeed.job.status) ? "Обзор появится после завершения анализа." : "В сохранённом обзоре пока нет подтверждённых персональных новостных сигналов."}</p>}
-                  {realFeed?.insight_markets.length ? <>
-                    <h3>Рыночные наблюдения по профилю</h3>
-                    <ul>{realFeed.insight_markets.map((item) => <li key={`insight-${item.instrument}`}><a href="#real-markets">{item.title}: {item.price} {item.currency}{item.change_pct !== null ? ` · ${item.change_pct}%` : ""}</a><br /><small>{item.reason}; наблюдение по MOEX на {item.source_timestamp}, не прогноз влияния.</small></li>)}</ul>
-                  </> : null}
-                  <button type="button" className="secondary" onClick={() => void refreshInsightNow()} disabled={insightBusy}>{insightBusy ? "Обновляем обзор…" : "Обновить обзор сейчас"}</button>
-                  {realFeed?.trigger === "manual" ? <button type="button" onClick={() => void analyzeNewsNow()} disabled={feedBusy}>Обновить анализ</button> : null}
-                </section>
-                <section className="card market-panel" id="real-markets">
-                  <h2>Рынки</h2>
-                  <p className="hint">Источник: Московская биржа (MOEX ISS). Бесплатные данные могут быть задержаны; время и источник указаны для каждого значения.</p>
-                  {realMarkets?.snapshot.items.length ? <ul>{realMarkets.snapshot.items.map((item) => <li key={`${item.category}-${item.instrument}`}>
-                    <strong>{item.name}</strong> ({item.instrument}): {item.price} {item.currency}{item.change_pct !== null ? ` · ${item.change_pct > 0 ? "+" : ""}${item.change_pct}%` : ""}{item.profile_reason ? <span className="market-profile-reason"> · {item.profile_reason}</span> : null}<br />
-                    <small>MOEX: {item.source_timestamp} · получено {new Date(item.observed_at).toLocaleString("ru-RU")} · <a href={item.source_url} target="_blank" rel="noreferrer">источник</a></small>
-                    <br /><button type="button" className="secondary" onClick={() => void toggleMarketHistory(item.category, item.instrument)} disabled={marketHistoryBusy === `${item.category}:${item.instrument}`}>
-                      {marketHistoryBusy === `${item.category}:${item.instrument}` ? "Загружаем…" : marketHistories[`${item.category}:${item.instrument}`] ? "Скрыть историю" : "История"}
-                    </button>
-                    {marketHistories[`${item.category}:${item.instrument}`] ? <div className="market-history">
-                      {item.profile_reason ? <p>{item.profile_reason}. Это связь по профилю, а не прогноз финансового эффекта.</p> : null}
-                      <p>Изменение за сохранённый период: {marketHistories[`${item.category}:${item.instrument}`].change_over_period_pct === null ? "недостаточно точек" : `${marketHistories[`${item.category}:${item.instrument}`].change_over_period_pct}%`}</p>
-                      <ol>{marketHistories[`${item.category}:${item.instrument}`].items.map((point, index) => <li key={`${point.source_timestamp}-${index}`}>{point.source_timestamp}: {point.price} {point.currency} · получено {new Date(point.observed_at).toLocaleString("ru-RU")} · <a href={point.source_url} target="_blank" rel="noreferrer">источник MOEX</a></li>)}</ol>
-                    </div> : null}
-                  </li>)}</ul> : <p>{realMarkets?.latest ? "В хранилище пока нет котировок. Проверьте статус и запустите ручной сбор в настройках разработчика." : "Рыночный сбор ещё не запускался. Запустить его можно в настройках разработчика."}</p>}
-                  {realMarkets?.latest ? <p className="hint">Последний сбор: {new Date(realMarkets.latest.finished_at).toLocaleString("ru-RU")} · {realMarkets.latest.status}{realMarkets.delayed ? " · задержанные данные" : ""}</p> : null}
-                </section>
-              </>
-            ) : null}
-            {editingProfile ? <form className="card settings-form profile-form" onSubmit={(event) => void saveProfile(event)}>
-              <h2>Профиль компании</h2>
-              {profileMeta?.status === "complete" ? <button type="button" className="linkish" onClick={returnToNews}>Вернуться к новостям</button> : null}
-              <p className="hint">Пустые поля останутся неизвестными. Не указывайте номера счетов или точные финансовые суммы.</p>
-              <p className="hint">Для завершения профиля укажите название компании и краткое описание либо явно пропустите описание. Черновик можно сохранить и без них.</p>
-              <div className="profile-grid">
-                <label>Название компании / бренда *<input maxLength={200} value={profile.company_name} onChange={(event) => updateProfile("company_name", event.target.value)} /></label>
-                <label>Сайт компании<input type="text" inputMode="url" placeholder="https://example.ru" maxLength={500} value={profile.website} onChange={(event) => updateProfile("website", event.target.value)} /></label>
-                <label>Страна<input maxLength={100} value={profile.country} onChange={(event) => updateProfile("country", event.target.value)} /></label>
-                <label>Регион<input maxLength={150} value={profile.region} onChange={(event) => updateProfile("region", event.target.value)} /></label>
-                <label>Город<input maxLength={150} value={profile.city} onChange={(event) => updateProfile("city", event.target.value)} /></label>
-                <label>Основная деятельность<input maxLength={200} value={profile.industry} onChange={(event) => updateProfile("industry", event.target.value)} /></label>
-                <label>ОКВЭД, если знаете<input maxLength={30} value={profile.okved} onChange={(event) => updateProfile("okved", event.target.value)} /></label>
-                <label>Размер компании<input placeholder="Например: 11–50 сотрудников" maxLength={100} value={profile.size_band} onChange={(event) => updateProfile("size_band", event.target.value)} /></label>
-                <label>Этап бизнеса<input placeholder="Например: рост" maxLength={100} value={profile.business_stage} onChange={(event) => updateProfile("business_stage", event.target.value)} /></label>
-              </div>
-              <div className="site-analysis-controls">
-                <label className="profile-skip">
-                  <input type="checkbox" checked={siteConsent} onChange={(event) => setSiteConsent(event.target.checked)} />
-                  <span>Согласен отправить текст публичных страниц выбранной модели для анализа. При облачном маршруте он будет передан внешнему API; закрытые данные отправлять не следует.</span>
-                </label>
-                <button type="button" onClick={() => void analyzeWebsite()} disabled={!profile.website || !siteConsent || profileDirty || siteBusy}>
-                  {siteBusy ? "Анализируем…" : "Подтянуть данные с сайта"}
-                </button>
-                {profileDirty && profile.website ? <small>Сохраните изменения профиля перед запуском анализа.</small> : null}
-              </div>
-              <label>Кратко о бизнесе<textarea maxLength={2000} rows={3} value={profile.description} onChange={(event) => updateProfile("description", event.target.value)} /></label>
-              <label className="profile-skip"><input type="checkbox" checked={profile.description_skipped} onChange={(event) => updateProfile("description_skipped", event.target.checked)} />Пока пропустить описание</label>
-              <fieldset className="profile-tags">
-                <legend>Отраслевые теги</legend>
-                {profileOptions.industry_tags.map((tag) => (
-                  <label className="profile-tag" key={tag.id} title={tag.description}>
-                    <input type="checkbox" checked={profile.industry_tags.includes(tag.id)} onChange={(event) => toggleTag("industry_tags", tag.id, event.target.checked)} />
-                    <span><strong>{tag.label}</strong><small>{tag.description}</small></span>
-                  </label>
-                ))}
-              </fieldset>
-              <label>Товары и услуги<textarea maxLength={1500} rows={2} value={profile.products_services} onChange={(event) => updateProfile("products_services", event.target.value)} /></label>
-              <div className="profile-grid">
-                <label>Тип клиентов<input maxLength={500} value={profile.customer_types} onChange={(event) => updateProfile("customer_types", event.target.value)} /></label>
-                <label>Модель бизнеса<input maxLength={500} value={profile.business_model} onChange={(event) => updateProfile("business_model", event.target.value)} /></label>
-              </div>
-              <h3>Что актуально для компании?</h3>
-              <div className="profile-grid">
-                <label>Кредитование / ставки<select value={profile.credit_interest} onChange={(event) => updateProfile("credit_interest", event.target.value as Interest)}><option value="unknown">Не знаю</option><option value="interested">Интересно</option><option value="not_relevant">Неактуально</option></select></label>
-                <label>Депозиты / ликвидность<select value={profile.deposit_interest} onChange={(event) => updateProfile("deposit_interest", event.target.value as Interest)}><option value="unknown">Не знаю</option><option value="interested">Интересно</option><option value="not_relevant">Неактуально</option></select></label>
-                <label>Валютные операции<select value={profile.currency_interest} onChange={(event) => updateProfile("currency_interest", event.target.value as Interest)}><option value="unknown">Не знаю</option><option value="interested">Интересно</option><option value="not_relevant">Неактуально</option></select></label>
-                <label>Экспорт / импорт<select value={profile.export_import_interest} onChange={(event) => updateProfile("export_import_interest", event.target.value as Interest)}><option value="unknown">Не знаю</option><option value="interested">Интересно</option><option value="not_relevant">Неактуально</option></select></label>
-                <label>Лизинг<select value={profile.leasing_interest} onChange={(event) => updateProfile("leasing_interest", event.target.value as Interest)}><option value="unknown">Не знаю</option><option value="interested">Интересно</option><option value="not_relevant">Неактуально</option></select></label>
-                <label>Гарантии<select value={profile.guarantees_interest} onChange={(event) => updateProfile("guarantees_interest", event.target.value as Interest)}><option value="unknown">Не знаю</option><option value="interested">Интересно</option><option value="not_relevant">Неактуально</option></select></label>
-                <label>Факторинг<select value={profile.factoring_interest} onChange={(event) => updateProfile("factoring_interest", event.target.value as Interest)}><option value="unknown">Не знаю</option><option value="interested">Интересно</option><option value="not_relevant">Неактуально</option></select></label>
-                <label>Расчёты и зарплатные проекты<select value={profile.settlements_interest} onChange={(event) => updateProfile("settlements_interest", event.target.value as Interest)}><option value="unknown">Не знаю</option><option value="interested">Интересно</option><option value="not_relevant">Неактуально</option></select></label>
-              </div>
-              <label>География рынков и поставок, через запятую<input maxLength={1000} value={profile.market_geographies.join(", ")} onChange={(event) => updateGeographies(event.target.value)} /></label>
-              <label>Зависимость от сырья, энергии или поставок<textarea maxLength={1000} rows={2} value={profile.dependencies} onChange={(event) => updateProfile("dependencies", event.target.value)} /></label>
-              <fieldset className="profile-tags">
-                <legend>Темы, за которыми следить</legend>
-                {profileOptions.focus_topics.map((tag) => (
-                  <label className="profile-tag" key={tag.id} title={tag.description}>
-                    <input type="checkbox" checked={profile.focus_topics.includes(tag.id)} onChange={(event) => toggleTag("focus_topics", tag.id, event.target.checked)} />
-                    <span><strong>{tag.label}</strong><small>{tag.description}</small></span>
-                  </label>
-                ))}
-              </fieldset>
-              <label>Внешние факторы, влияющие на бизнес<textarea maxLength={1500} rows={2} value={profile.external_factors} onChange={(event) => updateProfile("external_factors", event.target.value)} /></label>
-              <label>Дополнительный контекст<textarea maxLength={1500} rows={2} value={profile.context_note} onChange={(event) => updateProfile("context_note", event.target.value)} /></label>
-              <button type="submit" disabled={profileBusy}>{profileBusy ? "Сохраняем…" : "Сохранить профиль"}</button>
-              <p className="hint">Сайт разбирается кнопкой выше. Найденные значения сразу записываются в пустые поля: проверьте их и сохраните правки.</p>
-            </form> : null}
-            {editingProfile && profileMeta?.status !== "complete" ? <section className="card">
-              <h2>Свежие новости</h2>
-              <p className="hint">Профиль ещё заполнен не полностью, поэтому показываем общие материалы без заявления о персональной релевантности.</p>
-              {realFeed?.items.length ? <ul className="hits">{realFeed.items.slice(0, 10).map((item) => <li key={item.id}>
-                <a href={item.url} target="_blank" rel="noreferrer">{item.title}</a><br />
-                <small>{item.source} · {item.published_at}</small>
-              </li>)}</ul> : <p>{realFeed ? "В свежем окне пока нет сохранённых публикаций." : "Загружаем свежие публикации…"}</p>}
-            </section> : null}
-            </>}
-          </>
-        ) : ready ? (
-          <>
-            <p className="lead">
-              {registering
-                ? "Создайте аккаунт, чтобы заполнить профиль компании и получить персональную ленту."
-                : "Войдите в свой аккаунт или зарегистрируйтесь."}
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  /* ───── профиль компании ───── */
+
+  if (editingProfile) {
+    return (
+      <div className="bank real">
+        {header}
+        <main className="bank-main form-main">
+          <div className="real-head">
+            <div>
+              <h1>Профиль компании</h1>
+              <p className="session-line">
+                {profileMeta ? `${profileComplete ? "Профиль заполнен" : "Профиль заполнен частично"} · версия ${profileMeta.profile_version}` : "Расскажите о компании"}
+              </p>
+            </div>
+            <div className="real-head-actions">
+              <button type="button" className="btn btn-ghost" onClick={returnToNews}>← К новостям</button>
+            </div>
+          </div>
+          {banners}
+          <SuggestionsPanel
+            suggestions={siteSuggestions} warnings={siteWarnings} busy={siteBusy} dirty={profileDirty}
+            label={suggestionLabel} fieldLabels={PROFILE_FIELD_LABELS} onDecide={(suggestion, accept) => void decideSuggestion(suggestion, accept)}
+          />
+          <ProfileForm
+            profile={profile} options={profileOptions} busy={profileBusy} dirty={profileDirty}
+            siteConsent={siteConsent} siteBusy={siteBusy} onConsent={setSiteConsent} onAnalyzeSite={() => void analyzeWebsite()}
+            onChange={updateProfile} onToggleTag={toggleTag} onSubmit={(event) => void saveProfile(event)}
+          />
+        </main>
+      </div>
+    );
+  }
+
+  /* ───── главный экран: лента + разбор ───── */
+
+  return (
+    <div className="bank real">
+      {header}
+      <main className="bank-main">
+        <div className="real-head">
+          <div>
+            <h1>Что важно для вашей компании</h1>
+            <p className="session-line">
+              {profile.company_name || user.login}
+              {profileMeta ? ` · ${profileComplete ? "профиль заполнен" : "профиль заполнен частично"}` : ""}
             </p>
-            <form className="card settings-form auth-form" onSubmit={(event) => void submit(event)}>
-              <label>
-                Логин
-                <input
-                  autoComplete="username"
-                  minLength={3}
-                  maxLength={64}
-                  value={login}
-                  onChange={(event) => setLogin(event.target.value)}
-                  required
-                />
-              </label>
-              <label>
-                Пароль
-                <input
-                  type="password"
-                  autoComplete={registering ? "new-password" : "current-password"}
-                  minLength={10}
-                  maxLength={128}
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  required
-                />
-              </label>
-              {registering ? (
-                <label>
-                  Повторите пароль
-                  <input
-                    type="password"
-                    autoComplete="new-password"
-                    minLength={10}
-                    maxLength={128}
-                    value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    required
-                  />
-                </label>
-              ) : null}
-              {error ? <p className="error" role="alert">{error}</p> : null}
-              {notice ? <p role="status">{notice}</p> : null}
-              <button type="submit" disabled={busy || !csrf}>
-                {busy ? "Подождите…" : registering ? "Зарегистрироваться" : "Войти"}
-              </button>
-            </form>
-            <p className="hint auth-hint">
-              Локальная регистрация прототипа. Восстановление пароля пока не подключено.
-            </p>
-            <button className="linkish" type="button" onClick={() => {
-              setRegistering((current) => !current);
-              setPassword("");
-              setConfirmPassword("");
-              setError("");
-              setNotice("");
-            }}>
-              {registering ? "Уже есть аккаунт? Войти" : "Нет аккаунта? Зарегистрироваться"}
+          </div>
+          <div className="real-head-actions">
+            <button type="button" className="btn btn-ghost" onClick={() => setEditingProfile(true)}>Профиль компании</button>
+            <button type="button" className="btn btn-primary" onClick={() => void openProfileChat()} disabled={chatBusy}>
+              {chatBusy ? "Открываем чат…" : "Спросить о бизнесе"}
             </button>
-          </>
+          </div>
+        </div>
+        {banners}
+        {!profileComplete ? (
+          <div className="nudge">
+            <span>Профиль заполнен не полностью, поэтому подборка пока общая. Расскажите о компании, чтобы увидеть, что важно именно вам.</span>
+            <button type="button" className="btn btn-primary small" onClick={() => setEditingProfile(true)}>Дополнить профиль</button>
+          </div>
         ) : null}
+
+        <div className="workspace real-workspace">
+          <section className="card feed-card" aria-label="Новости">
+            <div className="seg-tabs" role="tablist" aria-label="Какие новости показывать">
+              <button type="button" role="tab" aria-selected={feedTab === "personal"} onClick={() => setFeedTab("personal")}>Для вас{realFeed ? <span className="count">{personalCount}</span> : null}</button>
+              <button type="button" role="tab" aria-selected={feedTab === "all"} onClick={() => setFeedTab("all")}>Все новости{realFeed ? <span className="count">{allItems.length}</span> : null}</button>
+            </div>
+
+            {realFeed ? (
+              <p className="hint small">
+                {feedTab === "personal"
+                  ? "Новости, у которых нашлась понятная связь с вашей компанией. "
+                  : "Все свежие официальные публикации. "}
+                За последние {realFeed.lookback_days} дн.
+              </p>
+            ) : <p className="hint">Загружаем ленту…</p>}
+
+            {analysisRunning ? <p className="status-line" role="status">Подбираем новости под вашу компанию… осталось {realFeed?.pending_count ?? 0}</p> : null}
+            {!analysisRunning && realFeed && realFeed.pending_count > 0 ? (
+              <p className="status-line" role="status">Появились новые материалы: {realFeed.pending_count}. Обновите подборку, чтобы увидеть связь с вашей компанией.</p>
+            ) : null}
+            {realFeed?.job?.status === "failed" ? <p className="inline-error">Последний анализ завершился с ошибкой. Попробуйте запустить ещё раз.</p> : null}
+
+            <div className="feed-tools">
+              <input className="input" type="search" value={feedQuery} onChange={(event) => setFeedQuery(event.target.value)} placeholder="Поиск по теме или источнику" aria-label="Поиск по новостям" />
+              <button type="button" className="btn btn-ghost" onClick={() => void analyzeNewsNow()} disabled={feedBusy || analysisRunning}>
+                {feedBusy ? "Ставим в очередь…" : "Обновить подборку"}
+              </button>
+            </div>
+            <details className="filters" open={filtersActive}>
+              <summary>Фильтры{filtersActive ? " · включены" : ""}</summary>
+              <div className="filters-grid">
+                <label className="field"><span className="field-label">Категория</span>
+                  <select className="input" value={feedCategory} onChange={(event) => setFeedCategory(event.target.value)}>
+                    <option value="all">Все категории</option>
+                    {feedCategories.map(([category, title]) => <option key={category} value={category}>{title}</option>)}
+                  </select>
+                </label>
+                <label className="field"><span className="field-label">Период</span>
+                  <select className="input" value={feedPeriod} onChange={(event) => setFeedPeriod(event.target.value)}>
+                    <option value="window">Весь период ({realFeed?.lookback_days ?? 3} дн.)</option>
+                    <option value="day">Сегодня</option>
+                    <option value="three_days">3 дня</option>
+                  </select>
+                </label>
+              </div>
+            </details>
+
+            <NewsList
+              items={feedItems} selectedId={selectedItem?.id ?? ""} onSelect={selectNews}
+              emptyText={!realFeed ? "" : feedTab === "personal"
+                ? (personalCount === 0 && allItems.length > 0 ? "Пока нет новостей со связью с вашей компанией. Нажмите «Обновить подборку» или загляните во «Все новости»." : "По вашему запросу ничего не найдено.")
+                : "За выбранный период нет сохранённых новостей из подключённых источников."}
+            />
+          </section>
+
+          <section className="card real-detail" ref={detailRef} aria-label="Разбор">
+            {activeChatId ? (
+              <ChatPanel
+                sessionId={activeChatId} csrf={csrf} companyName={profile.company_name}
+                onBack={() => setActiveChatId("")} backLabel={selectedItem ? "К новости" : "К новостям"}
+              />
+            ) : selectedItem ? (
+              <NewsDetail
+                item={selectedItem} reportBusy={newsReportBusy === selectedItem.id} chatBusy={chatBusy}
+                onReport={(refresh) => void requestNewsReport(selectedItem.id, refresh)}
+                onChat={() => void openProfileChat(selectedItem.id)}
+              />
+            ) : (
+              <p className="empty">{realFeed ? "Выберите новость слева — здесь появится, что она значит для вашей компании." : "Загружаем…"}</p>
+            )}
+          </section>
+        </div>
+
+        <div className="secondary-grid">
+          <InsightPanel feed={realFeed} busy={insightBusy} onRefresh={() => void refreshInsightNow()} onSelect={selectNews} />
+          <MarketsPanel markets={realMarkets} histories={marketHistories} historyBusy={marketHistoryBusy} onToggle={(category, instrument) => void toggleMarketHistory(category, instrument)} />
+        </div>
       </main>
     </div>
   );
