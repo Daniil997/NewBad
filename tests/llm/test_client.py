@@ -58,7 +58,25 @@ def test_local_call_sends_options_once_and_no_auth(monkeypatch, tmp_path):
     assert _ok.seen["headers"] is None
     assert _ok.seen["payload"]["options"] == {"num_ctx": 4096}
     assert _ok.seen["payload"]["max_tokens"] == 20
+    assert "think" not in _ok.seen["payload"]
     assert list(_ok.seen["payload"]) == ["model", "messages", "temperature", "max_tokens", "options"]
+
+
+def test_ollama_local_call_disables_thinking(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434/v1")
+    monkeypatch.setattr("app.llm.client.request_options", lambda: {"num_ctx": 4096})
+    monkeypatch.setattr("app.llm.client.post_chat", _ok)
+
+    complete(
+        [{"role": "user", "content": "Reply with exactly WORKS"}],
+        model="gemma-4-26b-a4b",
+        mode="local_only",
+        max_tokens=50,
+    )
+
+    assert _ok.seen["payload"]["think"] is False
+    assert _ok.seen["url"] == "http://127.0.0.1:11434/v1/chat/completions"
 
 
 def test_json_parser_accepts_a_single_object_inside_model_wrappers():
