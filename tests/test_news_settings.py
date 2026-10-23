@@ -32,7 +32,7 @@ def test_news_developer_settings_persist_and_validate(monkeypatch, tmp_path):
 def test_task_model_settings_round_trip_and_reject_unknown_models(monkeypatch, tmp_path):
     monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "task-routes.sqlite3"))
     routes = {
-        "real": {"profile_site": "local_gemma", "news_report": "cloud_gemma", "chat": "mock"},
+        "real": {"profile_site": "local_gemma", "news_report": "cloud_gemma", "news_selection": "local_qwen", "chat": "mock"},
         "demo": {"news_card": "mock", "chat": "local_qwen"},
     }
     with TestClient(app) as client:
@@ -55,7 +55,7 @@ def test_task_route_save_does_not_require_or_reset_legacy_global_model_settings(
     monkeypatch.setenv("ALLOW_CLOUD", "true")
     monkeypatch.setenv("LLM_PLACEMENT", "gpu")
     routes = {
-        "real": {"profile_site": "local_gemma", "news_report": "mock", "chat": "mock"},
+        "real": {"profile_site": "local_gemma", "news_report": "mock", "news_selection": "local_gemma", "chat": "mock"},
         "demo": {"news_card": "local_qwen", "chat": "mock"},
     }
 
