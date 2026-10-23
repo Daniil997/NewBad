@@ -139,7 +139,7 @@ def complete_tier(messages: list[dict[str, str]], *, tier: str, max_tokens: int,
 
 def _complete_task_route(messages: list[dict[str, str]], selection: str, max_tokens: int) -> TierResult:
     route = _task_route(selection)
-    started = monotonic_monotonic_time.perf_counter()
+    started = monotonic_time.perf_counter()
     logger.info(
         "llm_task_route_start task_selection=%s mode=%s provider=%s model=%s max_tokens=%s reason=%s",
         selection, route.mode, route.provider, route.model, max_tokens, route.reason,
