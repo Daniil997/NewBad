@@ -6,6 +6,7 @@ from app.agent.loop_context import AgentContext
 from app.agent.tools import find_bank, find_news
 from app.llm.router import PlanChoice, Route, TierResult
 from app.profile.build import get_profile
+from app.user_store import init_app_db
 
 _ROUTE = Route(mode="local_only", provider="local", model="gemma-4-26b-a4b")
 _QUOTE = "сохранение ключевой ставки на уровне 14% означает, что стоимость заёмных денег пока не снижается"
@@ -150,6 +151,7 @@ def test_answer_rejects_an_unknown_source_and_broken_json(monkeypatch):
 def test_mock_provider_does_not_call_the_model(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("LLM_MODE", "mock")
+    init_app_db()
 
     def explode(*_args, **_kwargs):
         raise AssertionError("модель не должна вызываться")
