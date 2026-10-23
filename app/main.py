@@ -325,10 +325,6 @@ class SettingsView(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    # Legacy global model controls are optional: the current UI configures per-task routes.
-    mode: str | None = Field(default=None, min_length=1, max_length=40)
-    allow_cloud: bool | None = None
-    placement: str | None = Field(default=None, min_length=1, max_length=20)
     news_lookback_days: int = Field(default=3, ge=1, le=30)
     news_retention_days: int = Field(default=90, ge=1, le=3650)
     news_max_items: int = Field(default=500, ge=10, le=10000)
@@ -358,7 +354,7 @@ class SettingsUpdate(BaseModel):
     @classmethod
     def valid_task_routes(cls, values: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
         expected = {"real": {"profile_site", "news_report", "chat"}, "demo": {"news_card", "chat"}}
-        allowed = {"inherit", "mock", "local_gemma", "local_qwen", "cloud_gemma", "cloud_glm", "cloud_qwen", "cloud_deepseek", "cloud_vl", "cloud_kimi"}
+        allowed = {"mock", "local_gemma", "local_qwen", "cloud_gemma", "cloud_glm", "cloud_qwen", "cloud_deepseek", "cloud_vl", "cloud_kimi"}
         if not values:
             return values
         if set(values) - set(expected):
@@ -1392,18 +1388,7 @@ def paste_news(client_id: str, body: PasteNews) -> Card:
 
 @app.post("/api/settings")
 def update_settings(body: SettingsUpdate) -> SettingsView:
-    """Сохраняет маршруты задач и параметры данных; legacy-поля модели необязательны."""
-    if body.mode is not None and body.mode not in known_modes():
-        raise HTTPException(status_code=400, detail="Некорректный общий режим модели")
-    if body.placement is not None and body.placement not in _PLACEMENTS:
-        raise HTTPException(status_code=400, detail="Некорректное размещение модели")
-    # Omitted legacy fields must not reset server defaults when the UI saves task routes.
-    if body.mode is not None:
-        os.environ["LLM_MODE"] = body.mode
-    if body.allow_cloud is not None:
-        os.environ["ALLOW_CLOUD"] = "true" if body.allow_cloud else "false"
-    if body.placement is not None:
-        os.environ["LLM_PLACEMENT"] = body.placement
+    """Сохраняет только индивидуальные маршруты задач и параметры данных."""
     saved = save_developer_settings({
         "task_routes": body.task_routes,
         "news_lookback_days": body.news_lookback_days,
