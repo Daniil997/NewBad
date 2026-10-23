@@ -12,6 +12,7 @@ type SettingsView = {
   insight_refresh_mode: string; insight_refresh_interval_hours: number;
   insight_retention_days: number;
   task_routes: Record<string, Record<string, string>>;
+  validate_numeric_grounding: boolean;
 };
 type NewsStatus = {
   sources: { id: string; name: string; url: string }[];
@@ -53,6 +54,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
   const [insightRefreshMode, setInsightRefreshMode] = useState("manual");
   const [insightRefreshIntervalHours, setInsightRefreshIntervalHours] = useState(24);
   const [insightRetentionDays, setInsightRetentionDays] = useState(90);
+  const [validateNumericGrounding, setValidateNumericGrounding] = useState(true);
   const [taskRoutes, setTaskRoutes] = useState<Record<string, Record<string, string>>>({
     real: { profile_site: "mock", news_report: "mock", news_selection: "mock", chat: "mock" },
     demo: { news_card: "mock", chat: "mock" },
@@ -96,6 +98,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
         setInsightRefreshMode(payload.insight_refresh_mode);
         setInsightRefreshIntervalHours(payload.insight_refresh_interval_hours);
         setInsightRetentionDays(payload.insight_retention_days);
+        setValidateNumericGrounding(payload.validate_numeric_grounding ?? true);
         const normalizeRoute = (route?: string) => !route || route === "inherit" ? "mock" : route;
         setTaskRoutes({
           real: {
@@ -140,6 +143,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
           insight_refresh_mode: insightRefreshMode,
           insight_refresh_interval_hours: insightRefreshIntervalHours,
           insight_retention_days: insightRetentionDays,
+          validate_numeric_grounding: validateNumericGrounding,
           task_routes: taskRoutes,
         }),
       });
@@ -220,6 +224,15 @@ export function Settings({ onBack }: { onBack: () => void }) {
               {TASK_ROUTE_OPTIONS.map(([value, title]) => <option key={value} value={value}>{title}</option>)}
             </select>
           </label>)}
+        </fieldset>
+        <h2>Проверки ответов модели</h2>
+        <fieldset>
+          <legend>Проверка чисел в чате по профилю</legend>
+          <label className="check">
+            <input type="checkbox" checked={validateNumericGrounding} onChange={(event) => setValidateNumericGrounding(event.target.checked)} />
+            Проверять, что все числа в ответе подтверждаются указанными материалами
+          </label>
+          <p className="hint">Если отключить, чат по профилю не будет отклонять ответ только из-за неподтверждённых чисел. Проверка корректности JSON и ссылок на существующие материалы останется включённой. Настройка применяется после нажатия «Сохранить все настройки».</p>
         </fieldset>
         <h2>Сбор и хранение новостей</h2>
         <p className="hint">Используются официальные RSS-ленты. 0 часов означает только ручной запуск. Возраст новостей влияет и на сбор, и на актуальную ленту реального профиля.</p>
