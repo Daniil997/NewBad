@@ -4,6 +4,7 @@ from contextvars import ContextVar
 
 import yaml
 
+from app.agent.failure import record_failure, reset_failure
 from app.agent.loop_context import AgentContext
 from app.corpus.search import NewsItem
 from app.db import ROOT
@@ -153,15 +154,26 @@ def answer_profile_chat(question: str, history: list[dict[str, str]], evidence: 
     ]
     messages.extend(history[-8:])
     messages.append({"role": "user", "content": question})
-    payload, _route, _tokens = _ask(messages, token_limit("answer"), task="chat", space="real")
+    payload, route, _tokens = _ask(messages, token_limit("answer"), task="chat", space="real")
+    if payload is None:
+        return None
     if not isinstance(payload, dict):
+        _reject(route, "ответ модели не JSON-объект")
         return None
     answer = str(payload.get("answer") or "").strip()
     ids = _known_ids(payload.get("evidence_ids"), allowed)
-    if not answer or ids is None or not ids:
+    if not answer:
+        _reject(route, "в ответе модели нет текста")
+        return None
+    if ids is None:
+        _reject(route, "модель сослалась на несуществующие материалы")
+        return None
+    if not ids:
+        _reject(route, "модель не указала, на каких материалах основан ответ")
         return None
     corpus = _cited_text(ids, allowed)
     if not _grounded(answer, corpus):
+        _reject(route, "в ответе есть числа, которых нет в указанных материалах")
         return None
     return {"answer": answer, "evidence_ids": ids}
 
@@ -181,7 +193,7 @@ def analyze_profile_news(profile: dict, news: NewsItem) -> dict | None:
          "text": f"{news.title}. {news.excerpt}", "url": news.url, "published_at": news.published_at},
     ]
     allowed = _index(evidence)
-    payload, _route, _tokens = _ask(
+    payload, route, _tokens = _ask(
         _messages(
             (
                 "Составь краткий разбор официальной новости для владельца компании по переданному профилю. "
@@ -196,20 +208,29 @@ def analyze_profile_news(profile: dict, news: NewsItem) -> dict | None:
         token_limit("answer"),
         task="news_report", space="real",
     )
+    if payload is None:
+        return None
     if not isinstance(payload, dict):
+        _reject(route, "ответ модели не JSON-объект")
         return None
     ids = _known_ids(payload.get("evidence_ids"), allowed)
     if not ids or f"news:{news.id}" not in ids:
+        _reject(route, "в разборе нет ссылки на саму новость")
         return None
     corpus = _cited_text(ids, allowed)
     result = {}
     for field in ("summary", "relevance", "risks", "opportunities"):
         value = str(payload.get(field) or "").strip()
-        if not value or not _grounded(value, corpus):
+        if not value:
+            _reject(route, f"в разборе не заполнено поле {field}")
+            return None
+        if not _grounded(value, corpus):
+            _reject(route, f"в поле {field} есть числа, которых нет в материалах")
             return None
         result[field] = value[:900]
     questions = payload.get("questions")
     if not isinstance(questions, list) or any(not isinstance(item, str) or not _grounded(item, corpus) for item in questions):
+        _reject(route, "вопросы в разборе некорректны или содержат числа, которых нет в материалах")
         return None
     result["questions"] = [item.strip()[:300] for item in questions[:3] if item.strip()]
     result["evidence_ids"] = ids
@@ -259,13 +280,28 @@ def _news_evidence(news: NewsItem, text: str | None = None) -> dict:
 
 
 def _ask(messages: list[dict[str, str]], max_tokens: int, *, task: str | None = None, space: str = "demo") -> tuple[dict | None, Route, int]:
+    reset_failure()
     outcome = complete_tier(messages, tier="heavy", max_tokens=max_tokens, task=task, space=space)
     if not outcome.text:
+        # Модель не вызывалась (mock, закрытое облако, недоступный локальный сервер) или вернула пустоту.
+        record_failure(
+            "model_unavailable", outcome.route.reason,
+            mode=outcome.route.mode, provider=outcome.route.provider, model=outcome.route.model,
+        )
         return None, outcome.route, 0
     try:
         return parse_json(outcome.text), outcome.route, outcome.tokens
     except LLMError:
+        record_failure(
+            "invalid_json", "ответ модели не разобран как JSON",
+            mode=outcome.route.mode, provider=outcome.route.provider, model=outcome.route.model,
+        )
         return None, outcome.route, 0
+
+
+def _reject(route: Route, reason: str) -> None:
+    """Модель ответила, но ответ не прошёл проверку по материалам."""
+    record_failure("validation", reason, mode=route.mode, provider=route.provider, model=route.model)
 
 
 def _origin(route: Route) -> str:
