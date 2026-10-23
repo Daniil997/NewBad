@@ -154,14 +154,14 @@ def test_profile_chat_ignores_numbered_list_markers_but_rejects_unsupported_numb
         {"evidence_id": "news:item", "text": "В материале описаны изменения тарифов."},
     ]
     _install(monkeypatch, {
-        "answer": "1. В материале описаны изменения тарифов.\\n2. Оценка: это может повлиять на расходы компании.",
+        "answer": "1. В материале описаны изменения тарифов.\n2. Оценка: это может повлиять на расходы компании.",
         "evidence_ids": ["company-profile", "news:item"],
     })
     result = answer_profile_chat("Как это повлияет?", [], evidence)
     assert result is not None
 
     _install(monkeypatch, {
-        "answer": "1. В материале описаны изменения тарифов.\\n2. Расходы вырастут на 14 процентов.",
+        "answer": "1. В материале описаны изменения тарифов.\n2. Расходы вырастут на 14 процентов.",
         "evidence_ids": ["company-profile", "news:item"],
     })
     assert answer_profile_chat("Как это повлияет?", [], evidence) is None
