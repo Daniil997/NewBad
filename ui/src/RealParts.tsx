@@ -40,7 +40,7 @@ function isCurrencyRatesNews(item: RealNewsItem): boolean {
 
 function parseCurrencyRates(excerpt: string): { name: string; value: string }[] {
   const rates: { name: string; value: string }[] = [];
-  const pattern = /(?:^|\\s)([А-ЯЁа-яёA-Za-z][А-ЯЁа-яёA-Za-z .()]*?)\\s+-\\s+(\\d+[,.]\\d+)/g;
+  const pattern = /(?:^|\s)([А-ЯЁа-яёA-Za-z][А-ЯЁа-яёA-Za-z .()]*?)\s+-\s+(\d+[,.]\d+)/g;
   for (const match of excerpt.matchAll(pattern)) {
     const name = match[1].trim();
     if (name) rates.push({ name, value: match[2].replace(".", ",") });
