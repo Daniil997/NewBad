@@ -33,12 +33,9 @@ export function NewsList({ items, selectedId, onSelect, emptyText }: {
   );
 }
 
-function isCurrencyRatesNews(item: RealNewsItem): boolean {
-  return item.event_type.toLowerCase() === "fx"
-    || /курсы? валют/i.test(item.title)
-    // Некоторые источники не заполняют event_type и не упоминают валюты в заголовке.
-    // Если в тексте есть строки с курсами, всё равно показываем структурированный блок.
-    || parseCurrencyRates(item.excerpt).length > 0;
+export function isCurrencyRatesNews(item: RealNewsItem): boolean {
+  // Курсы валют — отдельный виджет, а не новость в ленте.
+  return /курсы? валют/i.test(item.title) || parseCurrencyRates(item.excerpt).length > 0;
 }
 
 function parseCurrencyRates(excerpt: string): { name: string; value: string }[] {
@@ -51,7 +48,7 @@ function parseCurrencyRates(excerpt: string): { name: string; value: string }[] 
   return rates;
 }
 
-function CurrencyRatesPanel({ item }: { item: RealNewsItem }) {
+export function CurrencyRatesPanel({ item }: { item: RealNewsItem }) {
   const rates = parseCurrencyRates(item.excerpt);
   if (!rates.length) return null;
   return (
@@ -91,7 +88,7 @@ export function NewsDetail({ item, reportBusy, chatBusy, onReport, onChat }: {
         {item.source}
         {item.url ? <> · <a href={item.url} target="_blank" rel="noreferrer">Читать первоисточник ↗</a></> : null}
       </p>
-      {isCurrencyRatesNews(item) ? <CurrencyRatesPanel item={item} /> : item.excerpt ? <p className="detail-excerpt">{item.excerpt}</p> : null}
+      {item.excerpt ? <p className="detail-excerpt">{item.excerpt}</p> : null}
 
       <section className="detail-block">
         <h3>Почему это важно для вас</h3>
