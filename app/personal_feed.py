@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.user_store import connect_app, init_app_db, now_utc
 
-SCORING_VERSION = "real-rules-v1"
+SCORING_VERSION = "real-llm-v2"
 TOPIC_EVENT_MAP = {
     "rates_inflation": {"monetary_policy", "inflation_macro", "macro", "bonds"},
     "exchange_rates": {"fx", "sanctions_trade"},
@@ -162,7 +162,7 @@ def claim_job(lease_seconds: int = 300) -> dict | None:
     return {**dict(row), "candidate_ids": json.loads(row["candidate_ids_json"])}
 
 
-def save_job_results(job: dict, profile: dict, items_by_id: dict) -> None:
+def save_job_results(job: dict, profile: dict, items_by_id: dict, model_results: dict[str, dict] | None = None) -> None:
     init_app_db()
     created = now_utc()
     with connect_app() as connection:
@@ -170,7 +170,7 @@ def save_job_results(job: dict, profile: dict, items_by_id: dict) -> None:
             item = items_by_id.get(news_id)
             if item is None:
                 continue
-            result = evaluate(profile, item)
+            result = (model_results or {}).get(news_id) or evaluate(profile, item)
             connection.execute(
                 """INSERT OR IGNORE INTO profile_news_analysis
                 (profile_id, profile_version, news_id, news_hash, scoring_version, relevant, score, reasons_json, created_at)
