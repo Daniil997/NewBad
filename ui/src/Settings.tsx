@@ -34,6 +34,14 @@ const MODE_LABELS: Record<string, string> = {
   mock: "Заглушка", local_only: "Локальная Gemma", local_dual: "Локальные Gemma и Qwen",
   hybrid: "Гибрид: облако с локальным резервом", cloud_only: "Облако", replay: "Повтор сохранённого ответа",
 };
+const MODE_DESCRIPTIONS: Record<string, string> = {
+  mock: "Модель не вызывается: используются шаблонные ответы.",
+  local_only: "Все стандартные вызовы модели идут на локальную Gemma.",
+  local_dual: "Короткие задачи выполняет локальная Gemma, более тяжёлые — локальная Qwen.",
+  hybrid: "Короткие задачи выполняет локальная Gemma; тяжёлые идут в облако с локальным резервом.",
+  cloud_only: "Стандартные вызовы идут в облако. Нужны разрешение облака и ключ на сервере.",
+  replay: "Возвращается сохранённый ответ из кэша; новый вызов модели не выполняется.",
+};
 const TASK_ROUTE_OPTIONS = [
   ["inherit", "Общий режим"], ["mock", "Заглушка (без вызова модели)"],
   ["local_gemma", "Локально: Gemma"], ["local_qwen", "Локально: Qwen"],
@@ -153,7 +161,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
       }
       setSettings(payload);
       await Promise.all([refreshNewsStatus(), refreshMarketStatus()]);
-      setSaved("Настройки сохранены в SQLite. Общий режим действует до перезапуска; маршруты задач применяются сразу.");
+      setSaved("Сохранено. Общий режим, разрешение облака и размещение действуют в текущем процессе до перезапуска; маршруты задач и параметры сбора/хранения применяются без перезапуска.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Нет ответа от API");
     } finally {
@@ -200,25 +208,28 @@ export function Settings({ onBack }: { onBack: () => void }) {
       <button className="linkish" type="button" onClick={onBack}>На главную</button>
       <h1>Настройки разработки</h1>
       <p className="lead">
-        Здесь переключается режим модели у уже запущенного сервера. Обычный экран сервиса эти поля не показывает.
-        Ключ API отсюда не задаётся.
+        Здесь настраивается текущий процесс сервера и фоновые задачи. Ключ API отсюда не задаётся.
       </p>
+      <p className="hint">Изменения в разных разделах сохраняются одной кнопкой «Сохранить все настройки». Сбор новостей и рыночных данных запускается отдельно кнопками «Собрать сейчас».</p>
       {error ? <p className="error">{error}</p> : null}
       <form className="card settings-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-        <label>Режим
+        <label>Общий режим модели по умолчанию
           <select value={mode} onChange={(event) => setMode(event.target.value)}>
             {MODES.map((item) => <option key={item} value={item}>{MODE_LABELS[item]}</option>)}
           </select>
         </label>
+        <p className="hint">{MODE_DESCRIPTIONS[mode] || "Общий режим используется там, где не задан отдельный маршрут задачи."} Отдельные маршруты ниже могут переопределять его.</p>
         <label className="check">
           <input type="checkbox" checked={allowCloud} onChange={(event) => setAllowCloud(event.target.checked)} />
-          Разрешить облако. Нужен вместе с hybrid или cloud_only.
+          Разрешить облачные вызовы (нужно для режимов hybrid/cloud_only и облачных маршрутов задач).
         </label>
-        <label>Размещение локальной модели
+        <label>Размещение локальной модели в Ollama
           <select value={placement} onChange={(event) => setPlacement(event.target.value)}>
-            {PLACEMENTS.map((item) => <option key={item} value={item}>{item === "auto" ? "auto — по свободной памяти" : item === "gpu" ? "gpu — целиком на видеокарте" : "ram — хвост в памяти"}</option>)}
+            {PLACEMENTS.map((item) => <option key={item} value={item}>{item === "auto" ? "auto — по свободной памяти" : item === "gpu" ? "gpu — целиком на видеокарте" : "ram — часть модели в оперативной памяти"}</option>)}
           </select>
         </label>
+        <p className="hint">Этот выбор применяется к локальному серверу Ollama (адрес обычно содержит порт 11434). Для llama-server на порту 8080 размещение задаётся при запуске; изменение здесь его не перезапускает.</p>
+        {(mode === "hybrid" || mode === "cloud_only") && !allowCloud ? <p className="error">Выбран облачный режим, но облачные вызовы запрещены. Включите разрешение облака или выберите другой режим.</p> : null}
         <h2>Модели по задачам и режимам</h2>
         <p className="hint">Можно выбрать только модель из разрешённого списка. Облачные варианты работают лишь при включённом облаке и настроенном ключе на сервере. Ключ здесь не вводится и в браузер не передаётся. «Общий режим» использует переключатель выше.</p>
         <fieldset>
@@ -239,8 +250,8 @@ export function Settings({ onBack }: { onBack: () => void }) {
           </label>)}
         </fieldset>
         <h2>Сбор и хранение новостей</h2>
-        <p className="hint">Используются официальные RSS-ленты. 0 часов означает только ручной запуск.</p>
-        <label>Окно публикаций при сборе (дней)
+        <p className="hint">Используются официальные RSS-ленты. 0 часов означает только ручной запуск. Возраст новостей влияет и на сбор, и на актуальную ленту реального профиля.</p>
+        <label>Учитывать новости не старше (дней)
           <input type="number" min={1} max={30} value={newsLookbackDays} onChange={(event) => setNewsLookbackDays(Number(event.target.value))} />
         </label>
         <label>Хранить новости (дней)
@@ -255,7 +266,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
             {[1, 3, 6, 12, 24].map((hours) => <option key={hours} value={hours}>Каждые {hours} ч.</option>)}
           </select>
         </label>
-        <button type="submit" disabled={busy}>{busy ? "Сохраняем…" : "Применить настройки"}</button>
+        <button type="submit" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить все настройки"}</button>
         {saved ? <p>{saved}</p> : null}
       </form>
       <section className="card">
@@ -276,7 +287,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
         <fieldset>
           <legend>Собирать категории</legend>
           {Object.entries(MARKET_CATEGORY_LABELS).map(([id, label]) => <label className="check" key={id}>
-            <input type="checkbox" checked={marketCategories.includes(id)} onChange={(event) => setMarketCategories((current) => event.target.checked ? [...current, id] : current.filter((item) => item !== id))} />
+            <input type="checkbox" checked={marketCategories.includes(id)} disabled={marketCategories.length === 1 && marketCategories.includes(id)} onChange={(event) => setMarketCategories((current) => event.target.checked ? [...current, id] : current.filter((item) => item !== id))} />
             {label}
           </label>)}
         </fieldset>
@@ -304,7 +315,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
           </select>
         </label>
         <label>Интервал обновления обзора
-          <select value={insightRefreshIntervalHours} onChange={(event) => setInsightRefreshIntervalHours(Number(event.target.value))}>
+          <select disabled={insightRefreshMode !== "interval"} value={insightRefreshIntervalHours} onChange={(event) => setInsightRefreshIntervalHours(Number(event.target.value))}>
             {[1, 3, 6, 12, 24, 48, 72].map((hours) => <option key={hours} value={hours}>Каждые {hours} ч.</option>)}
           </select>
         </label>
@@ -312,9 +323,8 @@ export function Settings({ onBack }: { onBack: () => void }) {
           <input type="number" min={1} max={3650} value={insightRetentionDays} onChange={(event) => setInsightRetentionDays(Number(event.target.value))} />
         </label>
         <p className="hint">Снимки старше срока удаляются из SQLite при сохранении настройки, открытии профиля и фоновой очистке раз в час. Подробные разборы новостей хранятся отдельно.</p>
-        <button type="submit" disabled={busy}>{busy ? "Сохраняем…" : "Применить настройки"}</button>
-      </form>
-      <form className="card settings-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+      </section>
+      <section className="card settings-form">
         <h2>Анализ новостей для профиля</h2>
         <p className="hint">Первая версия использует объяснимые правила и не вызывает модель. Оценки привязаны к версии профиля и материалу.</p>
         <label>Когда запускать анализ
@@ -325,15 +335,14 @@ export function Settings({ onBack }: { onBack: () => void }) {
           </select>
         </label>
         <label>Интервал автоматического анализа
-          <select value={analysisIntervalHours} onChange={(event) => setAnalysisIntervalHours(Number(event.target.value))}>
+          <select disabled={analysisTrigger !== "on_new_interval"} value={analysisIntervalHours} onChange={(event) => setAnalysisIntervalHours(Number(event.target.value))}>
             {[1, 3, 6, 12, 24, 48, 72].map((hours) => <option key={hours} value={hours}>Каждые {hours} ч.</option>)}
           </select>
         </label>
         <label>Максимум новостей за один запуск
           <input type="number" min={1} max={100} value={analysisMaxCandidates} onChange={(event) => setAnalysisMaxCandidates(Number(event.target.value))} />
         </label>
-        <button type="submit" disabled={busy}>{busy ? "Сохраняем…" : "Применить настройки"}</button>
-      </form>
+      </section>
       <section className="card">
         <h2>Рыночные данные MOEX</h2>
         <p><a href="https://www.moex.com/a2920" target="_blank" rel="noreferrer">Московская биржа — документация ISS</a></p>
@@ -354,7 +363,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
           <div><dt>Чем отвечаем</dt><dd>{settings.active_generation}</dd></div>
           <div><dt>Модель</dt><dd>{settings.model}</dd></div>
           <div><dt>Облако</dt><dd>{settings.allow_cloud ? "разрешено" : "выключено"}</dd></div>
-          <div><dt>Сервер на видеокарте</dt><dd>{settings.local_server === "up" ? "отвечает" : settings.local_server === "down" ? "не запущен" : "не используется"}</dd></div>
+          <div><dt>Локальный сервер модели</dt><dd>{settings.local_server === "up" ? "отвечает" : settings.local_server === "down" ? "не запущен" : "не используется"}</dd></div>
         </dl>
       </section> : null}
     </main>
