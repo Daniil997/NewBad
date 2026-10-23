@@ -19,6 +19,7 @@ def test_local_mode_extracts_and_drafts_pasted_news(monkeypatch, tmp_path):
     monkeypatch.setenv("LLM_MODE", "local_only")
     monkeypatch.setenv("ALLOW_CLOUD", "false")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "settings.sqlite3"))
     seen: list[str] = []
 
     def fake_post(_url: str, payload: dict, timeout: float, headers: dict | None = None) -> dict:
@@ -67,6 +68,8 @@ def test_local_mode_extracts_and_drafts_pasted_news(monkeypatch, tmp_path):
 
     monkeypatch.setattr("app.llm.client.post_chat", fake_post)
     with TestClient(app) as client:
+        configured = client.post("/api/settings", json={"task_routes": {"demo": {"news_card": "local_gemma"}}})
+        assert configured.status_code == 200
         created = client.post(
             "/api/clients/U-BORROWER/news",
             json={
