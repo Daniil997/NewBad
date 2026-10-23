@@ -32,16 +32,25 @@ def check() -> int:
 
 
 def import_rss() -> int:
-    from app.ingest.news import NewsIngestError, import_news
+    from app.ingest.news import import_news_catalog, migrate_legacy_imports
+    from app.news_store import prune_stored_news
+    from app.user_store import developer_settings, init_app_db
 
-    try:
-        batch = import_news(ROOT / "data" / "news" / "imported")
-    except NewsIngestError as error:
-        print(f"импорт новостей не выполнен: {error}")
-        return 1
-    accepted = sum(1 for item in batch.items if item.status != "duplicate")
-    print(f"импорт новостей: статус {batch.status}, принято {accepted}, отклонено {len(batch.rejected)}")
-    return 0
+    init_app_db()
+    settings = developer_settings()
+    output = ROOT / "data" / "news" / "imported"
+    migrate_legacy_imports(output)
+    batch = import_news_catalog(output, max_age_days=settings["news_lookback_days"])
+    retention = prune_stored_news(
+        retention_days=settings["news_retention_days"], max_items=settings["news_max_items"]
+    )
+    for source in batch.sources:
+        print(
+            f"{source['source']}: {source['status']}, новых {source['imported']}, "
+            f"дублей {source['duplicates']}, отклонено {source['rejected']}"
+        )
+    print(f"SQLite: осталось новостей {retention['remaining']}")
+    return 1 if batch.status == "error" else 0
 
 
 def import_bank() -> int:

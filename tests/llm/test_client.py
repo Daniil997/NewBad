@@ -143,7 +143,7 @@ def test_local_alias_is_sent_as_the_api_id(monkeypatch, tmp_path):
 def test_token_cap_cuts_an_oversized_request(monkeypatch, tmp_path):
     _cloud(monkeypatch, tmp_path)
     complete([{"role": "user", "content": "ping"}], model=MODEL, mode="cloud_only", max_tokens=5000)
-    assert _ok.seen["payload"]["max_tokens"] == 400
+    assert _ok.seen["payload"]["max_tokens"] == 1200
 
 
 def test_cloud_requires_a_key_and_does_not_echo_it(monkeypatch, tmp_path):

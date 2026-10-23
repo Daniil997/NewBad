@@ -9,7 +9,9 @@ from pydantic import BaseModel
 
 from app.db import ROOT, connect, init_db
 from app.llm.client import LLMError, complete, parse_json, server_reachable
+from app.llm.registry import api_models, require_allowed
 from app.tracing.journal import log_llm_call
+from app.user_store import developer_settings
 
 ALLOWED_TOOLS = ("get_profile", "search_news", "search_bank_analytics", "get_counterparties")
 
@@ -40,7 +42,11 @@ def current_route() -> Route:
     return resolve_route("light")
 
 
-def resolve_route(tier: str = "light") -> Route:
+def resolve_route(tier: str = "light", *, task: str | None = None, space: str = "demo") -> Route:
+    if task:
+        selection = developer_settings().get("task_routes", {}).get(space, {}).get(task, "inherit")
+        if selection != "inherit":
+            return _task_route(selection)
     mode = _mode_name()
     if _is_replay(mode):
         model = _first_model(mode, tier)
@@ -79,7 +85,11 @@ def choose_tools(planned: list[str]) -> PlanChoice:
     return _plan(kept or tools, outcome.route, outcome.tokens)
 
 
-def complete_tier(messages: list[dict[str, str]], *, tier: str, max_tokens: int) -> TierResult:
+def complete_tier(messages: list[dict[str, str]], *, tier: str, max_tokens: int, task: str | None = None, space: str = "demo") -> TierResult:
+    if task:
+        configured = developer_settings().get("task_routes", {}).get(space, {}).get(task, "inherit")
+        if configured != "inherit":
+            return _complete_task_route(messages, configured, max_tokens)
     mode = _mode_name()
     if _is_replay(mode):
         return _from_cache(messages, tier)
@@ -123,6 +133,49 @@ def complete_tier(messages: list[dict[str, str]], *, tier: str, max_tokens: int)
     reason = handoff or _closed_reason()
     _log("mock-model", "mock", "mock", reason)
     return TierResult(Route(mode="mock", provider="mock", model="mock-model", reason=reason))
+
+
+def _complete_task_route(messages: list[dict[str, str]], selection: str, max_tokens: int) -> TierResult:
+    route = _task_route(selection)
+    if route.provider == "mock":
+        _log(route.model, route.provider, route.mode, route.reason)
+        return TierResult(route)
+    provider, mode, model = route.provider, route.mode, route.model
+    try:
+        result = complete(messages, model=model, mode=mode, max_tokens=max_tokens, provider=provider)
+    except LLMError as exc:
+        reason = f"Выбранная модель недоступна ({exc})"
+        _log("mock-model", "mock", "mock", reason)
+        return TierResult(Route(mode="mock", provider="mock", model="mock-model", reason=reason))
+    _remember(messages, result.model, result.provider, result.text, result.tokens)
+    return TierResult(Route(mode=mode, provider=provider, model=result.model, reason="Маршрут модели для выбранной задачи"), result.text, result.tokens)
+
+
+def _task_route(selection: str) -> Route:
+    if selection == "mock":
+        return Route(mode="mock", provider="mock", model="mock-model", reason="Для задачи выбран mock; модель не вызывается")
+    local_options = {"local_gemma": "gemma-4-26b-a4b", "local_qwen": "qwen3.6-35b-a3b"}
+    cloud_options = {
+        "cloud_gemma": "google/gemma-4-26b-a4b-it",
+        "cloud_glm": "z-ai/glm-5.3-flash",
+        "cloud_qwen": "qwen/qwen3.6-35b-a3b",
+        "cloud_deepseek": "deepseek/deepseek-v4.1-flash",
+        "cloud_vl": "qwen/qwen3-vl-30b-a3b-instruct",
+        "cloud_kimi": "moonshotai/kimi-k2.6",
+    }
+    if selection in local_options:
+        model = local_options[selection]
+        require_allowed(model)
+        return Route(mode="local_only", provider="local", model=model, reason="Маршрут модели для выбранной задачи")
+    if selection in cloud_options:
+        model = cloud_options[selection]
+        if model not in api_models():
+            return Route(mode="mock", provider="mock", model="mock-model", reason="Облачная модель отсутствует в allowlist")
+        blocked = _cloud_block()
+        if blocked:
+            return Route(mode="mock", provider="mock", model="mock-model", reason=blocked)
+        return Route(mode="cloud_only", provider="cloud", model=model, reason="Маршрут модели для выбранной задачи")
+    return Route(mode="mock", provider="mock", model="mock-model", reason="Неизвестная задача-модель; безопасная заглушка")
 
 
 def local_status() -> str:

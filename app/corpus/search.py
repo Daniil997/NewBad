@@ -1,5 +1,6 @@
 import json
 import re
+import sqlite3
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -104,6 +105,24 @@ def load_news(folder: Path | None = None, today: date | None = None) -> list[New
     seen_urls: set[str] = set()
     for path in paths:
         record = _news_record(_read_news(path), current, taxonomy)
+        if record is None:
+            continue
+        url_key = _article_key(record.url)
+        if record.id in seen_ids or (url_key is not None and url_key in seen_urls):
+            continue
+        seen_ids.add(record.id)
+        if url_key is not None:
+            seen_urls.add(url_key)
+        items.append(record)
+    try:
+        from app.news_store import imported_news
+
+        stored_records = imported_news()
+    except sqlite3.Error as error:
+        raise CorpusError("load", "Не удалось загрузить новости из SQLite") from error
+    for raw in stored_records:
+        raw["status"] = "imported"
+        record = _news_record(raw, current, taxonomy)
         if record is None:
             continue
         url_key = _article_key(record.url)

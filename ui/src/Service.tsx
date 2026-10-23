@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ModeSwitch, type AppMode } from "./ModeSwitch";
 
 type ClientProfile = {
   client_id: string;
@@ -76,10 +77,14 @@ const LAYER_LABEL: Record<string, string> = {
 
 export function Service({
   clientId,
+  mode,
+  onModeChange,
   onHome,
   onLogout,
 }: {
   clientId: string;
+  mode: AppMode;
+  onModeChange: (mode: AppMode) => void;
   onHome: () => void;
   onLogout: () => void;
 }) {
@@ -280,9 +285,8 @@ export function Service({
   return (
     <div className="bank">
       <header className="bank-bar">
-        <button className="bar-button" type="button" onClick={onHome}>
-          Альфа-Бизнес
-        </button>
+        <button className="bar-button" type="button" onClick={onHome}>Альфа-Бизнес</button>
+        <ModeSwitch mode={mode} onChange={onModeChange} />
         <button className="bar-button" type="button" onClick={onLogout}>
           Выйти
         </button>

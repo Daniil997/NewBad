@@ -30,6 +30,45 @@ def test_same_conditions_select_the_same_model(monkeypatch):
     assert resolve_route("light").provider == "local"
 
 
+def test_task_route_can_override_global_mode_for_a_real_task(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LLM_MODE", "mock")
+    monkeypatch.setenv("ALLOW_CLOUD", "false")
+    monkeypatch.setattr("app.llm.router.developer_settings", lambda: {
+        "task_routes": {"real": {"news_report": "local_gemma"}},
+    })
+    seen = []
+
+    def fake(_messages, *, model, mode, max_tokens, provider=None):
+        seen.append((model, mode, provider))
+        return Completion("{}", 7, model, provider or "local", mode)
+
+    monkeypatch.setattr("app.llm.router.complete", fake)
+    outcome = complete_tier([{"role": "user", "content": "report"}], tier="heavy", max_tokens=20,
+                            task="news_report", space="real")
+    assert seen == [("gemma-4-26b-a4b", "local_only", "local")]
+    assert outcome.route.provider == "local"
+
+
+def test_task_cloud_route_respects_global_cloud_permission(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ALLOW_CLOUD", "false")
+    monkeypatch.setenv("CASE_LLM_API_KEY", "test-secret")
+    monkeypatch.setattr("app.llm.router.developer_settings", lambda: {
+        "task_routes": {"real": {"chat": "cloud_kimi"}},
+    })
+
+    def explode(*_args, **_kwargs):
+        raise AssertionError("облачный запрос должен быть заблокирован")
+
+    monkeypatch.setattr("app.llm.router.complete", explode)
+    outcome = complete_tier([{"role": "user", "content": "chat"}], tier="heavy", max_tokens=20,
+                            task="chat", space="real")
+    assert outcome.text is None
+    assert outcome.route.provider == "mock"
+    assert "облако выключено" in outcome.route.reason
+
+
 def test_cloud_only_is_blocked_without_permission_or_key(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("LLM_MODE", "cloud_only")

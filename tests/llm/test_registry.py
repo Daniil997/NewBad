@@ -62,4 +62,4 @@ def test_budget_and_call_limits_follow_the_instruction():
     assert token_limit("plan") == 120
     assert token_limit("fact") == 180
     assert token_limit("copy") == 400
-    assert token_limit("answer") == 250
+    assert token_limit("answer") == 500

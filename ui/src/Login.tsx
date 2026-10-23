@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ModeSwitch, type AppMode } from "./ModeSwitch";
 
 type ClientSummary = {
   client_id: string;
@@ -14,10 +15,14 @@ const ROLE_LABEL: Record<string, string> = {
 };
 
 export function Login({
+  mode,
+  onModeChange,
   onEnter,
   onHome,
   onSettings,
 }: {
+  mode: AppMode;
+  onModeChange: (mode: AppMode) => void;
   onEnter: (clientId: string) => void;
   onHome: () => void;
   onSettings: () => void;
@@ -46,9 +51,8 @@ export function Login({
   return (
     <div className="bank">
       <header className="bank-bar">
-        <button className="bar-button" type="button" onClick={onHome}>
-          Альфа-Бизнес
-        </button>
+        <button className="bar-button" type="button" onClick={onHome}>Альфа-Бизнес</button>
+        <ModeSwitch mode={mode} onChange={onModeChange} />
       </header>
       <main className="bank-main narrow">
         <h1>Вход</h1>

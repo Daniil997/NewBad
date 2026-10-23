@@ -1,7 +1,7 @@
 import json
 
 from app.agent.draft import draft_card
-from app.agent.generate import answer_with_model, evidence_packet, extract_fact, request_copy
+from app.agent.generate import answer_profile_chat, answer_with_model, evidence_packet, extract_fact, request_copy
 from app.agent.loop_context import AgentContext
 from app.agent.tools import find_bank, find_news
 from app.llm.router import PlanChoice, Route, TierResult
@@ -30,7 +30,7 @@ def _install(monkeypatch, reply, route: Route | None = None):
     chosen = route or _ROUTE
     sent: list[dict] = []
 
-    def fake(messages, *, tier, max_tokens):
+    def fake(messages, *, tier, max_tokens, **_route_options):
         del tier, max_tokens
         sent.append(json.loads(messages[1]["content"]))
         text = reply if isinstance(reply, str) else json.dumps(reply, ensure_ascii=False)
@@ -171,7 +171,7 @@ def test_cloud_copy_uses_the_heavy_route(monkeypatch):
     )
     seen: dict[str, object] = {}
 
-    def fake(_messages, *, tier, max_tokens):
+    def fake(_messages, *, tier, max_tokens, **_route_options):
         seen["tier"] = tier
         seen["max_tokens"] = max_tokens
         return TierResult(route=route, text=json.dumps(_good_copy(), ensure_ascii=False), tokens=5)
@@ -208,3 +208,41 @@ def test_failed_model_text_stays_a_template(monkeypatch):
     assert card.llm_trace.mode == "template"
     assert card.llm_trace.provider == "template"
     assert "gemma" not in card.llm_trace.model
+
+
+def test_profile_chat_assesses_indirect_impact_without_inventing_numbers(monkeypatch):
+    prompts: list[str] = []
+
+    def fake(messages, *, tier, max_tokens, **_route_options):
+        del tier, max_tokens
+        prompts.append(messages[0]["content"])
+        return TierResult(route=_ROUTE, text=json.dumps({
+            "answer": (
+                "В материале сказано о расширении тарифного коридора страхования ответственности. "
+                "Оценка для компании: у оператора связи нет прямого отношения к опасным производствам, "
+                "косвенно вопрос может затронуть страхование инфраструктуры и подрядчиков."
+            ),
+            "evidence_ids": ["company-profile", "news:item"],
+        }, ensure_ascii=False), tokens=1)
+
+    monkeypatch.setattr("app.agent.generate.complete_tier", fake)
+    evidence = [
+        {"evidence_id": "company-profile", "text": "Компания: ПАО «МТС». Описание: связь и цифровые сервисы."},
+        {"evidence_id": "news:item", "text": "Расширение тарифного коридора страхования ответственности."},
+    ]
+    result = answer_profile_chat("Как косвенно это может повлиять?", [], evidence)
+    assert result is not None
+    assert "Оценка для компании" in result["answer"]
+    assert result["evidence_ids"] == ["company-profile", "news:item"]
+    assert "не отказывай" in prompts[0]
+    assert "focus=true" in prompts[0]
+
+    def invented(messages, *, tier, max_tokens, **_route_options):
+        del messages, tier, max_tokens
+        return TierResult(route=_ROUTE, text=json.dumps({
+            "answer": "Оценка: расходы вырастут на 14 процентов.",
+            "evidence_ids": ["news:item"],
+        }, ensure_ascii=False), tokens=1)
+
+    monkeypatch.setattr("app.agent.generate.complete_tier", invented)
+    assert answer_profile_chat("Как это повлияет?", [], evidence) is None

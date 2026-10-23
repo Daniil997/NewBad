@@ -1,8 +1,14 @@
+import { ModeSwitch, type AppMode } from "./ModeSwitch";
+
 export function Home({
+  mode,
+  onModeChange,
   entered,
   onOpen,
   onSettings,
 }: {
+  mode: AppMode;
+  onModeChange: (mode: AppMode) => void;
   entered: boolean;
   onOpen: () => void;
   onSettings: () => void;
@@ -10,8 +16,11 @@ export function Home({
   return (
     <div className="bank">
       <header className="bank-bar">
-        <strong>Альфа-Бизнес</strong>
-        <span>интернет-банк</span>
+        <div className="bank-brand">
+          <strong>Альфа-Бизнес</strong>
+          <span>интернет-банк</span>
+        </div>
+        <ModeSwitch mode={mode} onChange={onModeChange} />
       </header>
       <main className="bank-main">
         <h1>Главная</h1>
@@ -32,7 +41,13 @@ export function Home({
         <button className="widget" type="button" onClick={onOpen}>
           <span className="eyebrow">Сервис</span>
           <strong>Что важно для вашей компании</strong>
-          <em>{entered ? "Продолжить просмотр" : "Войти и открыть ленту"}</em>
+          <em>
+            {mode === "real"
+              ? "Войти или зарегистрироваться"
+              : entered
+                ? "Продолжить просмотр"
+                : "Открыть тестовые профили"}
+          </em>
         </button>
         <button className="dev-link" type="button" onClick={onSettings}>
           Настройки разработки

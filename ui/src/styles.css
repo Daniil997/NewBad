@@ -159,6 +159,93 @@ dd {
   font-size: 1rem;
 }
 
+.feed-tabs,
+.feed-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: end;
+  margin: 0.8rem 0;
+}
+
+.feed-tabs button[aria-selected="true"] {
+  background: #a91e17;
+}
+
+.feed-filters label {
+  display: grid;
+  gap: 0.25rem;
+  flex: 1 1 13rem;
+}
+
+.real-news-list {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.real-news-item {
+  padding: 1rem;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+}
+
+.real-news-item h3 a {
+  color: #242424;
+}
+
+.profile-chat-page { display: grid; gap: 1rem; }
+.profile-chat-page h2, .profile-chat-page p { margin-top: 0; }
+.profile-chat-messages { display: grid; gap: .85rem; max-height: 58vh; overflow-y: auto; padding: .25rem; }
+.profile-chat-message { border: 1px solid var(--line, #d9e0e8); border-radius: 12px; padding: .85rem 1rem; }
+.profile-chat-message.user { background: var(--surface-muted, #f5f7fa); }
+.profile-chat-message p { white-space: pre-wrap; margin: .45rem 0; }
+.profile-chat-citations ul { margin: .35rem 0 0; padding-left: 1.25rem; }
+.profile-chat-form { display: grid; gap: .65rem; }
+.profile-chat-form textarea { width: 100%; resize: vertical; }
+.news-report-controls { margin-top: .8rem; }
+.news-report { margin: .75rem 0; padding: .9rem 1rem; border-left: 3px solid var(--accent, #b51f2b); background: var(--surface-muted, #f5f7fa); }
+.news-report p { margin: .45rem 0; }
+
+.analysis-reasons,
+.market-panel li {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: #f7f5f1;
+}
+
+.analysis-reasons ul,
+.market-panel ul {
+  padding-left: 1.2rem;
+}
+
+.analysis-reasons small,
+.market-panel small {
+  color: #666;
+}
+
+.market-history {
+  margin-top: 0.75rem;
+  border-top: 1px solid #ddd;
+  max-height: 18rem;
+  overflow: auto;
+}
+
+.market-history ol {
+  padding-left: 1.4rem;
+}
+
+.market-panel .market-history li {
+  list-style: decimal;
+  padding: 0.2rem 0;
+  background: transparent;
+}
+
+.market-panel li {
+  list-style: none;
+}
+
 .hits button.event {
   display: block;
   width: 100%;
@@ -200,9 +287,50 @@ dd {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 1rem;
   background: #ef3124;
   color: #fff;
   padding: 0.9rem 1.4rem;
+}
+
+.bank-brand {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.bank-brand span {
+  margin-top: 0.15rem;
+  font-size: 0.82rem;
+}
+
+.mode-switch {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 0.2rem;
+  padding: 0.2rem;
+  border: 1px solid rgb(255 255 255 / 48%);
+  border-radius: 999px;
+}
+
+.mode-switch button {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.4rem 0.7rem;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mode-switch button.active {
+  background: #fff;
+  color: #b51f17;
+}
+
+.mode-switch button:focus-visible {
+  outline: 2px solid #1a1a1a;
+  outline-offset: 2px;
 }
 
 .bank-bar strong,
@@ -528,6 +656,163 @@ dd {
   padding: 0.5rem 0.6rem;
 }
 
+.settings-form input,
+.auth-form input {
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+}
+
+.profile-form h2,
+.profile-form h3,
+.profile-form p {
+  margin-top: 0;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.profile-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0.9rem 0;
+}
+
+.site-analysis-controls {
+  display: grid;
+  gap: 0.55rem;
+  border-left: 3px solid #ef3124;
+  padding: 0.2rem 0 0.2rem 0.8rem;
+}
+
+.site-analysis-controls .profile-skip {
+  align-items: flex-start;
+  line-height: 1.4;
+}
+
+.site-analysis-controls small {
+  color: #666;
+}
+
+.site-suggestion {
+  background: #fff8dd;
+  border: 1px solid #f0dfa4;
+  border-radius: 12px;
+  padding: 0.9rem;
+  margin: 0.8rem 0;
+}
+
+.site-suggestion h3 {
+  margin: 0 0 0.5rem;
+}
+
+.site-suggestion p {
+  margin: 0.45rem 0;
+  overflow-wrap: anywhere;
+}
+
+.site-suggestion blockquote {
+  margin: 0.55rem 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid #d9b84d;
+  background: rgba(255, 255, 255, 0.72);
+  overflow-wrap: anywhere;
+}
+
+.site-warning {
+  background: #fff8dd;
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+}
+
+.site-suggestion-actions {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.site-suggestion-actions button {
+  border: 0;
+  background: #ef3124;
+  color: #fff;
+  border-radius: 9px;
+  padding: 0.45rem 0.7rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.site-suggestion-actions button.secondary {
+  background: #e9e9e9;
+  color: #333;
+}
+
+.site-suggestion-actions button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.profile-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 0.6rem;
+  font: inherit;
+  resize: vertical;
+}
+
+.profile-form .profile-skip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.profile-form .profile-skip input {
+  width: auto;
+  padding: 0;
+}
+
+.profile-tags {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  border: 1px solid #e3e3e3;
+  border-radius: 12px;
+  padding: 0.8rem;
+  margin: 0;
+}
+
+.profile-tags legend {
+  padding: 0 0.25rem;
+  font-weight: 650;
+}
+
+.profile-form .profile-tag {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.profile-form .profile-tag input {
+  width: auto;
+  margin-top: 0.2rem;
+  padding: 0;
+}
+
+.profile-tag span {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.profile-tag small {
+  color: #666;
+  line-height: 1.35;
+}
+
 .settings-form .check {
   display: flex;
   gap: 0.5rem;
@@ -544,6 +829,26 @@ dd {
   cursor: pointer;
 }
 
+.auth-action {
+  border: 0;
+  background: #ef3124;
+  color: #fff;
+  border-radius: 10px;
+  padding: 0.5rem 0.8rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.auth-action:disabled,
+.settings-form button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.auth-hint {
+  margin-top: 0.8rem;
+}
+
 details.paste summary {
   cursor: pointer;
   font-weight: 650;
@@ -556,7 +861,21 @@ details.paste {
 
 @media (max-width: 800px) {
   .workspace,
-  .tiles {
+  .tiles,
+  .profile-grid,
+  .profile-tags {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .bank-bar {
+    flex-wrap: wrap;
+    padding: 0.75rem 1rem;
+  }
+
+  .mode-switch button {
+    padding: 0.35rem 0.55rem;
+    font-size: 0.85rem;
   }
 }
