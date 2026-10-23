@@ -325,6 +325,7 @@ class SettingsView(BaseModel):
     insight_refresh_interval_hours: int
     insight_retention_days: int
     task_routes: dict[str, dict[str, str]]
+    validate_numeric_grounding: bool = True
 
 
 class SettingsUpdate(BaseModel):
@@ -344,6 +345,7 @@ class SettingsUpdate(BaseModel):
     insight_refresh_mode: Literal["manual", "interval"] = "manual"
     insight_refresh_interval_hours: int = Field(default=24, ge=1, le=168)
     insight_retention_days: int = Field(default=90, ge=1, le=3650)
+    validate_numeric_grounding: bool = True
     task_routes: dict[str, dict[str, str]] = Field(default_factory=dict)
 
     @field_validator("market_categories")
@@ -1420,6 +1422,7 @@ def update_settings(body: SettingsUpdate) -> SettingsView:
     """Сохраняет только индивидуальные маршруты задач и параметры данных."""
     saved = save_developer_settings({
         "task_routes": body.task_routes,
+        "validate_numeric_grounding": body.validate_numeric_grounding,
         "news_lookback_days": body.news_lookback_days,
         "news_retention_days": body.news_retention_days,
         "news_max_items": body.news_max_items,
