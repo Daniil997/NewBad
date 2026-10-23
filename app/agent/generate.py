@@ -12,6 +12,7 @@ from app.corpus.search import NewsItem
 from app.db import ROOT
 from app.llm.client import LLMError, parse_json
 from app.llm.router import Route, complete_tier, token_limit
+from app.user_store import developer_settings
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,7 @@ def answer_profile_chat(question: str, history: list[dict[str, str]], evidence: 
     """Answer profile chat and retry when the numeric-grounding check fails."""
     packet = evidence[:12]
     allowed = _index(packet)
+    validate_numeric_grounding = developer_settings().get("validate_numeric_grounding", True)
     messages = [
         {
             "role": "system",
@@ -191,7 +193,7 @@ def answer_profile_chat(question: str, history: list[dict[str, str]], evidence: 
             reason = "модель не указала, на каких материалах основан ответ"
         else:
             corpus = _cited_text(ids, allowed)
-            if not _grounded(answer, corpus):
+            if validate_numeric_grounding and not _grounded(answer, corpus):
                 reason = "в ответе есть числа, которых нет в указанных материалах"
 
         if reason is None:
