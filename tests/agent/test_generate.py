@@ -148,6 +148,25 @@ def test_answer_rejects_an_unknown_source_and_broken_json(monkeypatch):
     assert answer_with_model("какая ставка", "Ключевая ставка 14%.", evidence) is None
 
 
+def test_profile_chat_ignores_numbered_list_markers_but_rejects_unsupported_numbers(monkeypatch):
+    evidence = [
+        {"evidence_id": "company-profile", "text": "Компания оказывает услуги связи."},
+        {"evidence_id": "news:item", "text": "В материале описаны изменения тарифов."},
+    ]
+    _install(monkeypatch, {
+        "answer": "1. В материале описаны изменения тарифов.\\n2. Оценка: это может повлиять на расходы компании.",
+        "evidence_ids": ["company-profile", "news:item"],
+    })
+    result = answer_profile_chat("Как это повлияет?", [], evidence)
+    assert result is not None
+
+    _install(monkeypatch, {
+        "answer": "1. В материале описаны изменения тарифов.\\n2. Расходы вырастут на 14 процентов.",
+        "evidence_ids": ["company-profile", "news:item"],
+    })
+    assert answer_profile_chat("Как это повлияет?", [], evidence) is None
+
+
 def test_mock_provider_does_not_call_the_model(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("LLM_MODE", "mock")
