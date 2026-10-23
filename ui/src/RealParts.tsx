@@ -33,6 +33,46 @@ export function NewsList({ items, selectedId, onSelect, emptyText }: {
   );
 }
 
+function isCurrencyRatesNews(item: RealNewsItem): boolean {
+  return item.event_type.toLowerCase() === "fx"
+    || /курсы? валют/i.test(item.title);
+}
+
+function parseCurrencyRates(excerpt: string): { name: string; value: string }[] {
+  const rates: { name: string; value: string }[] = [];
+  const pattern = /(?:^|\\s)([А-ЯЁа-яёA-Za-z][А-ЯЁа-яёA-Za-z .()]*?)\\s+-\\s+(\\d+[,.]\\d+)/g;
+  for (const match of excerpt.matchAll(pattern)) {
+    const name = match[1].trim();
+    if (name) rates.push({ name, value: match[2].replace(".", ",") });
+  }
+  return rates;
+}
+
+function CurrencyRatesPanel({ item }: { item: RealNewsItem }) {
+  const rates = parseCurrencyRates(item.excerpt);
+  if (!rates.length) return null;
+  return (
+    <section className="card side-card currency-rates" aria-label="Официальные курсы валют">
+      <h2>Курсы валют</h2>
+      <p className="hint small">Официальные курсы Банка России на дату публикации. Значения указаны в рублях по номиналу, установленному для каждой валюты.</p>
+      <ul className="market-list">
+        {rates.map((rate) => (
+          <li className="market-row" key={rate.name}>
+            <div className="market-top">
+              <div><strong>{rate.name}</strong></div>
+              <div className="market-price"><b>{rate.value} RUB</b></div>
+            </div>
+            <div className="market-foot">
+              <small>{item.source}</small>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {item.url ? <p className="hint small">Источник: <a href={item.url} target="_blank" rel="noreferrer">Банк России — курсы валют</a></p> : null}
+    </section>
+  );
+}
+
 export function NewsDetail({ item, reportBusy, chatBusy, onReport, onChat }: {
   item: RealNewsItem; reportBusy: boolean; chatBusy: boolean;
   onReport: (refresh: boolean) => void; onChat: () => void;
@@ -48,7 +88,7 @@ export function NewsDetail({ item, reportBusy, chatBusy, onReport, onChat }: {
         {item.source}
         {item.url ? <> · <a href={item.url} target="_blank" rel="noreferrer">Читать первоисточник ↗</a></> : null}
       </p>
-      {item.excerpt ? <p className="detail-excerpt">{item.excerpt}</p> : null}
+      {isCurrencyRatesNews(item) ? <CurrencyRatesPanel item={item} /> : item.excerpt ? <p className="detail-excerpt">{item.excerpt}</p> : null}
 
       <section className="detail-block">
         <h3>Почему это важно для вас</h3>
