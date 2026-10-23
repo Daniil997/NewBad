@@ -54,7 +54,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
   const [insightRefreshIntervalHours, setInsightRefreshIntervalHours] = useState(24);
   const [insightRetentionDays, setInsightRetentionDays] = useState(90);
   const [taskRoutes, setTaskRoutes] = useState<Record<string, Record<string, string>>>({
-    real: { profile_site: "mock", news_report: "mock", chat: "mock" },
+    real: { profile_site: "mock", news_report: "mock", news_selection: "mock", chat: "mock" },
     demo: { news_card: "mock", chat: "mock" },
   });
   const [error, setError] = useState("");
@@ -101,6 +101,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
           real: {
             profile_site: normalizeRoute(payload.task_routes?.real?.profile_site),
             news_report: normalizeRoute(payload.task_routes?.real?.news_report),
+            news_selection: normalizeRoute(payload.task_routes?.real?.news_selection),
             chat: normalizeRoute(payload.task_routes?.real?.chat),
           },
           demo: {
@@ -205,12 +206,12 @@ export function Settings({ onBack }: { onBack: () => void }) {
         <p className="hint">Можно выбрать только модель из разрешённого списка. Облачные варианты работают только если на сервере включён ALLOW_CLOUD=true и настроен CASE_LLM_API_KEY. Ключ здесь не вводится и в браузер не передаётся. Если настройка отсутствует или сохранено старое значение, используется безопасная заглушка; глобальный LLM_MODE не подменяет индивидуальный выбор.</p>
         <fieldset>
           <legend>Реальный режим</legend>
-          {([["profile_site", "Изучение сайта компании"], ["news_report", "Подробный разбор новости"], ["chat", "Чат по профилю"]] as const).map(([task, label]) => <label key={task}>{label}
+          {([["profile_site", "Изучение сайта компании"], ["news_report", "Подробный разбор новости"], ["news_selection", "Персональная подборка новостей"], ["chat", "Чат по профилю"]] as const).map(([task, label]) => <label key={task}>{label}
             <select value={taskRoutes.real?.[task] || "mock"} onChange={(event) => setTaskRoutes((routes) => ({ ...routes, real: { ...routes.real, [task]: event.target.value } }))}>
               {TASK_ROUTE_OPTIONS.map(([value, title]) => <option key={value} value={value}>{title}</option>)}
             </select>
           </label>)}
-          <p className="hint">Персональная подборка новостей сейчас оценивается локальными правилами без модели; сбор RSS и котировок также не вызывает LLM.</p>
+          <p className="hint">Персональная подборка использует выбранную модель для смысловой оценки кандидатов. При недоступности модели или некорректном ответе применяется fallback на правила. Сбор RSS и котировок не вызывает LLM.</p>
         </fieldset>
         <fieldset>
           <legend>Тестовый режим</legend>
