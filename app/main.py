@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, SecretStr, field_validator
 
 from app.agent.chat import ChatReply, answer_from_card
 from app.agent.failure import failure_detail
-from app.agent.generate import analyze_profile_news, answer_profile_chat
+from app.agent.generate import analyze_profile_news, answer_profile_chat, select_profile_news
 from app.agent.loop import build_card
 from app.agent.pasted import remember_pasted
 from app.corpus.search import (
@@ -353,7 +353,7 @@ class SettingsUpdate(BaseModel):
     @field_validator("task_routes")
     @classmethod
     def valid_task_routes(cls, values: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
-        expected = {"real": {"profile_site", "news_report", "chat"}, "demo": {"news_card", "chat"}}
+        expected = {"real": {"profile_site", "news_report", "news_selection", "chat"}, "demo": {"news_card", "chat"}}
         allowed = {"mock", "local_gemma", "local_qwen", "cloud_gemma", "cloud_glm", "cloud_qwen", "cloud_deepseek", "cloud_vl", "cloud_kimi"}
         if not values:
             return values
@@ -476,7 +476,9 @@ async def _analysis_worker() -> None:
                 continue
             imported = await asyncio.to_thread(load_news)
             by_id = {item.id: item for item in imported if item.status == "imported"}
-            await asyncio.to_thread(save_job_results, job, profile, by_id)
+            candidate_items = [by_id[news_id] for news_id in job["candidate_ids"] if news_id in by_id]
+            model_results = await asyncio.to_thread(select_profile_news, profile, candidate_items)
+            await asyncio.to_thread(save_job_results, job, profile, by_id, model_results)
         except Exception as error:
             await asyncio.to_thread(fail_job, job["id"], error.__class__.__name__)
 
