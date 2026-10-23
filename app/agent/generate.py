@@ -150,7 +150,7 @@ def answer_profile_chat(question: str, history: list[dict[str, str]], evidence: 
                 "Затем дай оценку для этой компании по профилю: через клиентов, подрядчиков, инфраструктуру, "
                 "страхование, регулирование, спрос или затраты. Явно назови эту часть оценкой, а не фактом публикации. "
                 "Если связь слабая, объясни почему именно для этого профиля. Не выдумывай цифры, цитаты и факты, "
-                "которых нет в evidence. Верни JSON {\\"answer\\":\\"...\\",\\"evidence_ids\\":[...]} и включи ID профиля "
+                "которых нет в evidence. Верни JSON {\"answer\":\"...\",\"evidence_ids\":[...]} и включи ID профиля "
                 "и ID новости, которые использованы."
             ),
         },
@@ -171,7 +171,7 @@ def answer_profile_chat(question: str, history: list[dict[str, str]], evidence: 
                     "role": "user",
                     "content": (
                         "Предыдущий ответ не удалось разобрать как JSON. Исправь его и верни только корректный JSON "
-                        "{\\"answer\\":\\"...\\",\\"evidence_ids\\":[...]}."
+                        "{\"answer\":\"...\",\"evidence_ids\":[...]}."
                     ),
                 })
                 logger.warning("llm_chat_retry attempt=%s reason=invalid_json", attempt + 1)
@@ -210,7 +210,7 @@ def answer_profile_chat(question: str, history: list[dict[str, str]], evidence: 
                     "Твой предыдущий ответ не прошёл проверку фактов: в нём есть числа, которых нет в выбранных "
                     "материалах. Перепиши ответ без неподтверждённых чисел и утверждений. Сохрани полезную оценку "
                     "для компании, но обозначай выводы как оценку. Используй только известные evidence_ids из "
-                    "исходных материалов. Верни только JSON {\\"answer\\":\\"...\\",\\"evidence_ids\\":[...]}."
+                    "исходных материалов. Верни только JSON {\"answer\":\"...\",\"evidence_ids\":[...]}."
                 ),
             })
             logger.warning("llm_chat_retry attempt=%s reason=numeric_validation", attempt + 1)
