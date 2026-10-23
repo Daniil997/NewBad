@@ -96,7 +96,18 @@ export function Settings({ onBack }: { onBack: () => void }) {
         setInsightRefreshMode(payload.insight_refresh_mode);
         setInsightRefreshIntervalHours(payload.insight_refresh_interval_hours);
         setInsightRetentionDays(payload.insight_retention_days);
-        setTaskRoutes({ real: { profile_site: "mock", news_report: "mock", chat: "mock", ...payload.task_routes?.real }, demo: { news_card: "mock", chat: "mock", ...payload.task_routes?.demo } });
+        const normalizeRoute = (route?: string) => !route || route === "inherit" ? "mock" : route;
+        setTaskRoutes({
+          real: {
+            profile_site: normalizeRoute(payload.task_routes?.real?.profile_site),
+            news_report: normalizeRoute(payload.task_routes?.real?.news_report),
+            chat: normalizeRoute(payload.task_routes?.real?.chat),
+          },
+          demo: {
+            news_card: normalizeRoute(payload.task_routes?.demo?.news_card),
+            chat: normalizeRoute(payload.task_routes?.demo?.chat),
+          },
+        });
         return Promise.all([refreshNewsStatus(), refreshMarketStatus()]);
       })
       .catch((reason: unknown) => {
