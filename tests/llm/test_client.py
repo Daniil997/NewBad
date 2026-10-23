@@ -1,4 +1,5 @@
 import json
+import logging
 
 import httpx
 import pytest
@@ -250,3 +251,48 @@ def test_transport_keeps_the_key_out_of_the_url_and_body():
         transport=httpx.MockTransport(handler),
     )
     assert body["choices"][0]["message"]["content"] == "ok"
+
+
+
+def test_full_prompt_and_response_are_logged_in_development(monkeypatch, tmp_path, caplog):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("LLM_LOG_CONTENT", "true")
+    monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8080/v1")
+    monkeypatch.setattr("app.llm.client.request_options", lambda: {})
+    monkeypatch.setattr("app.llm.client.post_chat", _ok)
+    caplog.set_level(logging.INFO, logger="app.llm.client")
+
+    complete(
+        [{"role": "system", "content": "Полная инструкция"}, {"role": "user", "content": "Вопрос для проверки"}],
+        model="gemma-4-26b-a4b",
+        mode="local_only",
+        max_tokens=20,
+    )
+
+    assert "llm_prompt" in caplog.text
+    assert "Полная инструкция" in caplog.text
+    assert "Вопрос для проверки" in caplog.text
+    assert "llm_response" in caplog.text
+    assert "готово" in caplog.text
+
+
+def test_full_prompt_and_response_logging_can_be_disabled(monkeypatch, tmp_path, caplog):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("LLM_LOG_CONTENT", "false")
+    monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8080/v1")
+    monkeypatch.setattr("app.llm.client.request_options", lambda: {})
+    monkeypatch.setattr("app.llm.client.post_chat", _ok)
+    caplog.set_level(logging.INFO, logger="app.llm.client")
+
+    complete(
+        [{"role": "user", "content": "НЕ ДОЛЖНО ПОПАСТЬ В ЛОГ"}],
+        model="gemma-4-26b-a4b",
+        mode="local_only",
+        max_tokens=20,
+    )
+
+    assert "НЕ ДОЛЖНО ПОПАСТЬ В ЛОГ" not in caplog.text
+    assert "llm_prompt" not in caplog.text
+    assert "llm_response" not in caplog.text
