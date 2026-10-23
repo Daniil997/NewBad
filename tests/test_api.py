@@ -121,7 +121,7 @@ def test_runtime_settings_switch_without_touching_the_key(monkeypatch, tmp_path)
     assert os.environ["LLM_PLACEMENT"] == "ram"
     assert _SECRET not in changed.text
     assert broken.status_code == 400
-    assert broken.json()["detail"] == "Некорректные настройки"
+    assert broken.json()["detail"] == "Некорректный общий режим модели"
     assert os.environ["LLM_MODE"] == "replay"
 
 
