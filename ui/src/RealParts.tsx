@@ -35,7 +35,10 @@ export function NewsList({ items, selectedId, onSelect, emptyText }: {
 
 function isCurrencyRatesNews(item: RealNewsItem): boolean {
   return item.event_type.toLowerCase() === "fx"
-    || /курсы? валют/i.test(item.title);
+    || /курсы? валют/i.test(item.title)
+    // Некоторые источники не заполняют event_type и не упоминают валюты в заголовке.
+    // Если в тексте есть строки с курсами, всё равно показываем структурированный блок.
+    || parseCurrencyRates(item.excerpt).length > 0;
 }
 
 function parseCurrencyRates(excerpt: string): { name: string; value: string }[] {
