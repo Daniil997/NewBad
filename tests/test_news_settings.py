@@ -52,6 +52,28 @@ def test_task_model_settings_round_trip_and_reject_unknown_models(monkeypatch, t
     assert invalid.status_code == 422
 
 
+def test_task_route_save_does_not_require_or_reset_legacy_global_model_settings(monkeypatch, tmp_path):
+    monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "task-routes-only.sqlite3"))
+    monkeypatch.setenv("LLM_MODE", "local_dual")
+    monkeypatch.setenv("ALLOW_CLOUD", "true")
+    monkeypatch.setenv("LLM_PLACEMENT", "gpu")
+    routes = {
+        "real": {"profile_site": "local_gemma", "news_report": "inherit", "chat": "mock"},
+        "demo": {"news_card": "local_qwen", "chat": "inherit"},
+    }
+
+    with TestClient(app) as client:
+        saved = client.post("/api/settings", json={"task_routes": routes})
+        loaded = client.get("/api/settings")
+
+    assert saved.status_code == 200
+    assert loaded.status_code == 200
+    assert loaded.json()["task_routes"] == routes
+    assert __import__("os").environ["LLM_MODE"] == "local_dual"
+    assert __import__("os").environ["ALLOW_CLOUD"] == "true"
+    assert __import__("os").environ["LLM_PLACEMENT"] == "gpu"
+
+
 def test_manual_news_collection_reports_per_source_results(monkeypatch, tmp_path):
     monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "accounts.sqlite3"))
     monkeypatch.setattr("app.main.import_news_catalog", lambda *args, **kwargs: SimpleNamespace(
