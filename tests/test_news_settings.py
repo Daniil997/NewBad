@@ -37,7 +37,7 @@ def test_task_model_settings_round_trip_and_reject_unknown_models(monkeypatch, t
     }
     with TestClient(app) as client:
         saved = client.post("/api/settings", json={
-            "mode": "mock", "allow_cloud": False, "placement": "auto", "task_routes": routes,
+            "task_routes": routes,
         })
         loaded = client.get("/api/settings")
         invalid = client.post("/api/settings", json={
