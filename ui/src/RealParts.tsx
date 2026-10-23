@@ -235,48 +235,7 @@ export function ChatPanel({ sessionId, csrf, companyName, onBack, backLabel }: {
 
 /* ───────────── Обзор и рынки ───────────── */
 
-export function InsightPanel({ feed, busy, onRefresh, onSelect }: {
-  feed: RealFeed | null; busy: boolean; onRefresh: () => void; onSelect: (id: string) => void;
-}) {
-  const running = Boolean(feed?.job && ["queued", "running"].includes(feed.job.status));
-  return (
-    <section className="card side-card">
-      <div className="side-head">
-        <h2>Главное сейчас</h2>
-        <button type="button" className="btn btn-ghost small" onClick={onRefresh} disabled={busy}>{busy ? "Обновляем…" : "Обновить"}</button>
-      </div>
-      <p className="hint small">
-        {feed?.insight_status ?? "Загружаем сохранённый обзор…"}
-        {feed?.insight_updated_at ? ` · сохранён ${formatDateTime(feed.insight_updated_at)}` : ""}
-      </p>
-      {feed?.insight.length ? (
-        <ul className="insight-list">
-          {feed.insight.map((item) => (
-            <li key={item.id}>
-              <button type="button" className="btn-link left" onClick={() => onSelect(item.id)}>{item.title}</button>
-              {item.analysis?.reasons[0] ? <small>{item.analysis.reasons[0]}</small> : null}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="empty">{running ? "Обзор появится после завершения анализа." : "Пока нет новостей, которые явно связаны с вашей компанией."}</p>
-      )}
-      {feed?.insight_markets.length ? (
-        <>
-          <h3>Рынки, которые вас касаются</h3>
-          <ul className="insight-list">
-            {feed.insight_markets.map((item) => (
-              <li key={`insight-${item.instrument}`}>
-                <a href="#real-markets">{item.title}: {formatPrice(item.price)} {item.currency}{item.change_pct !== null ? ` · ${item.change_pct > 0 ? "+" : ""}${item.change_pct}%` : ""}</a>
-                <small>{item.reason}. Наблюдение MOEX на {item.source_timestamp}, не прогноз влияния.</small>
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : null}
-    </section>
-  );
-}
+/* ───────────── Рынки ───────────── */
 
 export function MarketsPanel({ markets, histories, historyBusy, onToggle }: {
   markets: RealMarkets | null; histories: Record<string, MarketHistory>; historyBusy: string;
