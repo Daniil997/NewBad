@@ -2,7 +2,7 @@ import hashlib
 import json
 import logging
 import os
-import time
+import time as monotonic_time
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 
@@ -139,7 +139,7 @@ def complete_tier(messages: list[dict[str, str]], *, tier: str, max_tokens: int,
 
 def _complete_task_route(messages: list[dict[str, str]], selection: str, max_tokens: int) -> TierResult:
     route = _task_route(selection)
-    started = time.perf_counter()
+    started = monotonic_time.perf_counter()
     logger.info(
         "llm_task_route_start task_selection=%s mode=%s provider=%s model=%s max_tokens=%s reason=%s",
         selection, route.mode, route.provider, route.model, max_tokens, route.reason,
