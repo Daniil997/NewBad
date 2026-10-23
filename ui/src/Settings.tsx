@@ -28,22 +28,8 @@ type MarketStatus = {
 };
 const MARKET_CATEGORY_LABELS: Record<string, string> = { currencies: "Валюты", equities: "Акции", metals: "Металлы" };
 
-const MODES = ["mock", "local_only", "local_dual", "hybrid", "cloud_only", "replay"] as const;
-const PLACEMENTS = ["auto", "gpu", "ram"] as const;
-const MODE_LABELS: Record<string, string> = {
-  mock: "Заглушка", local_only: "Локальная Gemma", local_dual: "Локальные Gemma и Qwen",
-  hybrid: "Гибрид: облако с локальным резервом", cloud_only: "Облако", replay: "Повтор сохранённого ответа",
-};
-const MODE_DESCRIPTIONS: Record<string, string> = {
-  mock: "Модель не вызывается: используются шаблонные ответы.",
-  local_only: "Все стандартные вызовы модели идут на локальную Gemma.",
-  local_dual: "Короткие задачи выполняет локальная Gemma, более тяжёлые — локальная Qwen.",
-  hybrid: "Короткие задачи выполняет локальная Gemma; тяжёлые идут в облако с локальным резервом.",
-  cloud_only: "Стандартные вызовы идут в облако. Нужны разрешение облака и ключ на сервере.",
-  replay: "Возвращается сохранённый ответ из кэша; новый вызов модели не выполняется.",
-};
 const TASK_ROUTE_OPTIONS = [
-  ["inherit", "Общий режим"], ["mock", "Заглушка (без вызова модели)"],
+  ["mock", "Заглушка (без вызова модели)"],
   ["local_gemma", "Локально: Gemma"], ["local_qwen", "Локально: Qwen"],
   ["cloud_gemma", "Облако: Gemma"], ["cloud_glm", "Облако: GLM Flash"],
   ["cloud_qwen", "Облако: Qwen"], ["cloud_deepseek", "Облако: DeepSeek Flash"],
@@ -69,8 +55,8 @@ export function Settings({ onBack }: { onBack: () => void }) {
   const [insightRefreshIntervalHours, setInsightRefreshIntervalHours] = useState(24);
   const [insightRetentionDays, setInsightRetentionDays] = useState(90);
   const [taskRoutes, setTaskRoutes] = useState<Record<string, Record<string, string>>>({
-    real: { profile_site: "inherit", news_report: "inherit", chat: "inherit" },
-    demo: { news_card: "inherit", chat: "inherit" },
+    real: { profile_site: "mock", news_report: "mock", chat: "mock" },
+    demo: { news_card: "mock", chat: "mock" },
   });
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
@@ -112,7 +98,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
         setInsightRefreshMode(payload.insight_refresh_mode);
         setInsightRefreshIntervalHours(payload.insight_refresh_interval_hours);
         setInsightRetentionDays(payload.insight_retention_days);
-        setTaskRoutes(payload.task_routes);
+        setTaskRoutes({ real: { profile_site: "mock", news_report: "mock", chat: "mock", ...payload.task_routes?.real }, demo: { news_card: "mock", chat: "mock", ...payload.task_routes?.demo } });
         return Promise.all([refreshNewsStatus(), refreshMarketStatus()]);
       })
       .catch((reason: unknown) => {
@@ -206,13 +192,13 @@ export function Settings({ onBack }: { onBack: () => void }) {
       <p className="hint">Изменения в разных разделах сохраняются одной кнопкой «Сохранить все настройки». Сбор новостей и рыночных данных запускается отдельно кнопками «Собрать сейчас».</p>
       {error ? <p className="error">{error}</p> : null}
       <form className="card settings-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-        <p className="hint">Выбор модели задаётся отдельно для каждой задачи в разделе ниже. Для совместимости серверные значения по умолчанию сохраняются без изменения, но здесь больше не настраиваются.</p>
+        <p className="hint">Выбор модели задаётся отдельно для каждой задачи в разделе ниже. Глобальный режим модели не используется для выбора модели конкретной задачи.</p>
         <h2>Модели по задачам и режимам</h2>
-        <p className="hint">Можно выбрать только модель из разрешённого списка. Облачные варианты работают только если на сервере включён ALLOW_CLOUD=true и настроен CASE_LLM_API_KEY. Ключ здесь не вводится и в браузер не передаётся. «Общий режим» использует LLM_MODE, заданный на сервере; индивидуальные маршруты ниже переопределяют его.</p>
+        <p className="hint">Можно выбрать только модель из разрешённого списка. Облачные варианты работают только если на сервере включён ALLOW_CLOUD=true и настроен CASE_LLM_API_KEY. Ключ здесь не вводится и в браузер не передаётся. Если настройка отсутствует или сохранено старое значение, используется безопасная заглушка; глобальный LLM_MODE не подменяет индивидуальный выбор.</p>
         <fieldset>
           <legend>Реальный режим</legend>
           {([["profile_site", "Изучение сайта компании"], ["news_report", "Подробный разбор новости"], ["chat", "Чат по профилю"]] as const).map(([task, label]) => <label key={task}>{label}
-            <select value={taskRoutes.real?.[task] || "inherit"} onChange={(event) => setTaskRoutes((routes) => ({ ...routes, real: { ...routes.real, [task]: event.target.value } }))}>
+            <select value={taskRoutes.real?.[task] || "mock"} onChange={(event) => setTaskRoutes((routes) => ({ ...routes, real: { ...routes.real, [task]: event.target.value } }))}>
               {TASK_ROUTE_OPTIONS.map(([value, title]) => <option key={value} value={value}>{title}</option>)}
             </select>
           </label>)}
@@ -221,7 +207,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
         <fieldset>
           <legend>Тестовый режим</legend>
           {([["news_card", "Формирование карточки новости"], ["chat", "Чат тестового режима"]] as const).map(([task, label]) => <label key={task}>{label}
-            <select value={taskRoutes.demo?.[task] || "inherit"} onChange={(event) => setTaskRoutes((routes) => ({ ...routes, demo: { ...routes.demo, [task]: event.target.value } }))}>
+            <select value={taskRoutes.demo?.[task] || "mock"} onChange={(event) => setTaskRoutes((routes) => ({ ...routes, demo: { ...routes.demo, [task]: event.target.value } }))}>
               {TASK_ROUTE_OPTIONS.map(([value, title]) => <option key={value} value={value}>{title}</option>)}
             </select>
           </label>)}
@@ -332,17 +318,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
           {marketStatus.items.length ? <ul>{marketStatus.items.map((item) => <li key={`${item.category}-${item.instrument}`}>{item.name} ({item.instrument}): {item.price} {item.currency}{item.change_pct !== null ? ` · ${item.change_pct > 0 ? "+" : ""}${item.change_pct}%` : ""} · по MOEX: {item.source_timestamp}; получено: {new Date(item.observed_at).toLocaleString("ru-RU")}</li>)}</ul> : null}
         </> : <button type="button" onClick={() => void refreshMarketStatus()}>Загрузить состояние</button>}
       </section>
-      {settings ? <section className="card">
-        <h2>Состояние сервера (справочно)</h2>
-        <p className="hint">Это состояние серверного режима по умолчанию, а не выбранная модель для каждой задачи. Для конкретных задач применяются маршруты выше.</p>
-        <dl>
-          <div><dt>Режим</dt><dd>{MODE_LABELS[settings.mode] || settings.mode}</dd></div>
-          <div><dt>Чем отвечаем</dt><dd>{settings.active_generation}</dd></div>
-          <div><dt>Модель</dt><dd>{settings.model}</dd></div>
-          <div><dt>Облако</dt><dd>{settings.allow_cloud ? "разрешено" : "выключено"}</dd></div>
-          <div><dt>Локальный сервер модели</dt><dd>{settings.local_server === "up" ? "отвечает" : settings.local_server === "down" ? "не запущен" : "не используется"}</dd></div>
-        </dl>
-      </section> : null}
+
     </main>
   );
 }
