@@ -471,7 +471,7 @@ def select_profile_news(profile: dict, news_items: list[NewsItem]) -> dict[str, 
         "external_factors": profile.get("external_factors", ""), "context_note": profile.get("context_note", ""),
     }
     candidates = [{
-        "id": item.id, "title": item.title, "excerpt": item.excerpt,
+        "id": item.id, "title": item.title, "excerpt": item.excerpt[:850],
         "event_type": item.event_type or "unknown", "published_at": item.published_at,
         "source": item.source or "", "url": item.url,
     } for item in news_items[:30]]
