@@ -21,7 +21,7 @@ def test_news_developer_settings_persist_and_validate(monkeypatch, tmp_path):
             "news_max_items": 120, "news_collection_interval_hours": 6,
         })
     assert defaults.status_code == 200
-    assert defaults.json()["news_lookback_days"] == 3
+    assert defaults.json()["news_lookback_days"] == 14
     assert saved.status_code == 200
     assert loaded.json()["news_retention_days"] == 45
     assert loaded.json()["news_max_items"] == 120
