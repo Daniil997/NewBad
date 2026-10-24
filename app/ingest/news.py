@@ -620,7 +620,7 @@ def _child_local(raw: ElementTree.Element, name: str) -> str:
 class _ArticleTextParser(HTMLParser):
     """Extract readable article text while suppressing navigation and boilerplate."""
 
-    _SKIP = {"script", "style", "noscript", "svg", "nav", "footer", "header", "aside", "form", "button"}
+    _SKIP = {"script", "style", "noscript", "svg", "nav", "footer", "header", "aside", "form", "button", "iframe", "template", "select", "option"}
     _BLOCK = {"p", "div", "br", "li", "h1", "h2", "h3", "h4", "section", "article", "main", "tr"}
 
     def __init__(self) -> None:
@@ -749,10 +749,13 @@ def _strip_page_boilerplate(value: str) -> str:
 def _html_to_text(value: str) -> str:
     if not value:
         return ""
-    if "<" not in value:
-        return _strip_page_boilerplate(html.unescape(value))
+    # RSS sometimes escapes markup twice. Decode entities before detecting tags,
+    # otherwise literal "<p>" and "<br>" leak into the article text.
+    decoded = html.unescape(value)
+    if "<" not in decoded:
+        return _strip_page_boilerplate(decoded)
     parser = _ArticleTextParser()
-    parser.feed(html.unescape(value))
+    parser.feed(decoded)
     parser.close()
     return parser.text()
 
