@@ -146,6 +146,7 @@ def evaluate(profile: dict, item) -> dict:
             *(profile.get("market_geographies") or []),
         ]
         if value and len(str(value).strip()) >= 5
+        and str(value).strip().casefold() not in {"россия", "российская федерация", "весь мир"}
     ]
     matches = [value for value in regions if _has_phrase(text, value.replace("ё", "е"))]
     if matches:
