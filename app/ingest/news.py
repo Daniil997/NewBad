@@ -587,9 +587,11 @@ class _ArticleTextParser(HTMLParser):
         ]
         eligible = [(score, text) for score, text in eligible if len(text) >= _MIN_ARTICLE_TEXT]
         if eligible:
-            best = max(eligible, key=lambda pair: (pair[0], min(len(pair[1]), _MAX_ARTICLE_TEXT)))
-            if len(best[1]) >= len(body) * 0.25:
-                return best[1]
+            for _score, candidate_text in sorted(
+                eligible, key=lambda pair: (pair[0], min(len(pair[1]), _MAX_ARTICLE_TEXT)), reverse=True
+            ):
+                if len(candidate_text) >= len(body) * 0.25:
+                    return candidate_text
         return body
 
 
