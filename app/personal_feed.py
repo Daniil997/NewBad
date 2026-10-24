@@ -6,6 +6,7 @@ import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
+from app.profile.real_taxonomy import REAL_PROFILE_TAXONOMY
 from app.user_store import connect_app, init_app_db, now_utc
 
 BASE_SCORING_VERSION = "real-llm-v3"
@@ -33,6 +34,10 @@ INTEREST_EVENT_MAP = {
     "deposit_interest": {"monetary_policy", "inflation_macro", "bonds"},
     "currency_interest": {"fx", "sanctions_trade"},
     "export_import_interest": {"sanctions_trade", "fx", "commodities_energy"},
+    "leasing_interest": {"monetary_policy", "bonds", "regulation_tax"},
+    "guarantees_interest": {"sanctions_trade", "regulation_tax"},
+    "factoring_interest": {"monetary_policy", "consumption_labor", "regulation_tax"},
+    "settlements_interest": {"fx", "sanctions_trade", "regulation_tax"},
 }
 INDUSTRY_EVENT_MAP = {
     "energy_raw_materials": {"commodities_energy", "metals", "precious_metals"},
@@ -67,6 +72,17 @@ INTEREST_LABELS = {
     "deposit_interest": "интерес к депозитам и ликвидности",
     "currency_interest": "интерес к валютным операциям",
     "export_import_interest": "интерес к внешней торговле",
+    "leasing_interest": "интерес к лизингу",
+    "guarantees_interest": "интерес к банковским гарантиям",
+    "factoring_interest": "интерес к факторингу",
+    "settlements_interest": "интерес к расчётам и платежам",
+}
+
+TOPIC_LABELS = {
+    entry["id"]: entry["label"] for entry in REAL_PROFILE_TAXONOMY["focus_topics"]
+}
+INDUSTRY_LABELS = {
+    entry["id"]: entry["label"] for entry in REAL_PROFILE_TAXONOMY["industry_tags"]
 }
 
 
@@ -102,7 +118,12 @@ def evaluate(profile: dict, item) -> dict:
 
     for topic in profile.get("focus_topics", []):
         if event in TOPIC_EVENT_MAP.get(topic, set()):
-            add("focus", 0.68, f"Отслеживаемая тема профиля: {topic}")
+            # Broad regulatory stories are not automatically about IT or support.
+            if topic == "technology_security" and not re.search(r"цифров|кибер|информацион|программ|технолог", text):
+                continue
+            if topic == "business_support" and not re.search(r"поддержк|субсиди|льгот|грант|госзакуп", text):
+                continue
+            add("focus", 0.68, f"Отслеживаемая тема профиля: {TOPIC_LABELS.get(topic, topic)}")
             break
     for field, topics in INTEREST_EVENT_MAP.items():
         if profile.get(field) == "interested" and event in topics:
@@ -110,7 +131,9 @@ def evaluate(profile: dict, item) -> dict:
             break
     for tag in profile.get("industry_tags", []):
         if event in INDUSTRY_EVENT_MAP.get(tag, set()):
-            add("industry", 0.52, f"Возможна отраслевая связь: {tag}")
+            if tag == "it_communications" and event == "regulation_tax" and not re.search(r"цифров|связ|информацион|кибер|программ", text):
+                continue
+            add("industry", 0.52, f"Возможна отраслевая связь: {INDUSTRY_LABELS.get(tag, tag)}")
             break
 
     regions = [
