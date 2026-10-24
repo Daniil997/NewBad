@@ -878,7 +878,7 @@ def _profile_chat_evidence(saved: dict, focused_news_id: str | None) -> list[dic
     for item in chosen:
         evidence.append({
             "evidence_id": f"news:{item.id}", "title": item.title,
-            "text": f"{item.title}. {item.excerpt}", "url": item.url,
+            "text": f"{item.title}. {item.excerpt[:7000] if focused_news_id else item.excerpt[:1500]}", "url": item.url,
             "published_at": item.published_at, "kind": "news", "source": item.source or "Официальный источник",
             "focus": bool(focused_news_id and item.id == focused_news_id),
         })
