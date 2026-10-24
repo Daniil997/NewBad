@@ -23,7 +23,7 @@ export type RealNewsItem = {
   id: string; title: string; published_at: string; excerpt: string; event_type: string;
   event_title: string; source: string; url: string;
   analysis: null | { relevant: boolean; score: number; reasons: string[]; method: string; analyzed_at: string };
-  report: null | { summary: string; relevance: string; risks: string; opportunities: string; questions: string[]; evidence_ids: string[]; citations: ChatCitation[]; created_at: string };
+  report: null | { summary: string; relevance: string; risks: string; opportunities: string; next_step?: string; impact_channel?: string; origin?: string; questions: string[]; evidence_ids: string[]; citations: ChatCitation[]; created_at: string };
 };
 export type RealFeed = {
   items: RealNewsItem[]; insight: RealNewsItem[]; profile_version: number;
@@ -89,8 +89,8 @@ export function formatPrice(value: number): string {
 }
 
 export function relevanceInfo(score: number): { label: string; level: "high" | "mid" | "low" } {
-  if (score >= 0.7) return { label: "Сильная связь", level: "high" };
-  if (score >= 0.4) return { label: "Есть связь", level: "mid" };
+  if (score >= 0.80) return { label: "Сильная связь", level: "high" };
+  if (score >= 0.55) return { label: "Есть связь", level: "mid" };
   return { label: "Слабая связь", level: "low" };
 }
 
