@@ -147,7 +147,7 @@ def complete(
             message = body["message"]
             text = message["content"]
             first = {"finish_reason": body.get("done_reason")}
-            native_usage = body.get("usage") or {}
+            native_usage = body.get("usage") or body
             tokens = int(native_usage.get("prompt_eval_count", 0) or 0) + int(
                 native_usage.get("eval_count", 0) or 0
             )
