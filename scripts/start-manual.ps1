@@ -134,7 +134,6 @@ function Start-NewBad {
         Read-Host "Нажмите Enter"
         exit 1
     }
-    Start-Process "http://127.0.0.1:5173/"
     & (Join-Path $PSScriptRoot "dev.ps1")
     Write-Host ""
     Read-Host "Нажмите Enter"
