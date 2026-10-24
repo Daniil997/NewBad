@@ -313,7 +313,7 @@ def test_profile_chat_assesses_indirect_impact_without_inventing_numbers(monkeyp
     assert result is not None
     assert "Оценка для компании" in result["answer"]
     assert result["evidence_ids"] == ["company-profile", "news:item"]
-    assert "не отказывай" in prompts[0]
+    assert "всё равно дай полезную оценку косвенных сценариев" in prompts[0]
     assert "focus=true" in prompts[0]
 
     def invented(messages, *, tier, max_tokens, **_route_options):
