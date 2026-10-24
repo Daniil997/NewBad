@@ -81,73 +81,103 @@ export function NewsDetail({ item, reportBusy, chatBusy, onReport, onChat }: {
   const analysis = item.analysis;
   const rel = analysis?.relevant ? relevanceInfo(analysis.score) : null;
   const report = item.report;
-  return (
-    <article className="detail">
-      <p className="eyebrow">{item.event_title || "Новость"} · {formatDay(item.published_at)}</p>
-      <h2 className="detail-title">{item.title}</h2>
-      <p className="detail-source">
-        {item.source}
-        {item.url ? <> · <a href={item.url} target="_blank" rel="noreferrer">Читать первоисточник ↗</a></> : null}
-      </p>
-      {item.excerpt ? <p className="detail-excerpt">{item.excerpt}</p> : null}
+  const score = analysis ? Math.round(analysis.score * 100) : null;
 
-      <section className="detail-block">
-        <h3>Почему это важно для вас</h3>
-        {!analysis ? (
-          <p className="hint">Эта новость ещё не сопоставлена с профилем вашей компании. Нажмите «Обновить подборку» в списке слева.</p>
-        ) : (
+  return (
+    <article className="detail real-insight-card">
+      <header className="real-card-heading">
+        <p className="eyebrow">{item.event_title || "Новость"} · {formatDay(item.published_at)}</p>
+        <h2 className="detail-title">{item.title}</h2>
+        <p className="detail-source">
+          {item.source} · {item.published_at}
+          {item.url ? <> · <a href={item.url} target="_blank" rel="noreferrer">Оригинал публикации ↗</a></> : null}
+        </p>
+        <div className="real-card-verdict" aria-label="Оценка связи с компанией">
+          <div>
+            <span className="real-card-kicker">Связь с вашей компанией</span>
+            <strong className="real-card-verdict-label">
+              {rel ? <span className={"chip chip-" + rel.level}>{rel.label}</span>
+                : analysis ? "Связь не подтверждена" : "Оценка ещё не готова"}
+            </strong>
+          </div>
+          {score !== null ? <div className="real-card-score">
+            <span className="real-card-score-value">{score}<small>/100</small></span>
+            <span>индекс связи</span>
+          </div> : null}
+        </div>
+        {analysis ? (
           <>
-            {rel ? <p><span className={`chip chip-${rel.level}`}>{rel.label}</span></p>
-              : <p className="hint">Прямой связи с профилем вашей компании не найдено.</p>}
-            {analysis.reasons.length ? <ul className="reasons">{analysis.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul> : null}
+            <div className="real-link-meter" aria-hidden="true"><span style={{ width: String(Math.min(100, Math.max(0, score ?? 0))) + "%" }} /></div>
+            <p className="hint small real-card-help">Индекс отражает признаки связи, а не вероятность влияния события.</p>
+            <ul className="real-link-signals">{analysis.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>
             <details className="tech">
-              <summary>Как это определено</summary>
-              <p>Метод: {analysis.method}. Совпадение с профилем: {Math.round(analysis.score * 100)}%. Оценка от {formatDateTime(analysis.analyzed_at)}.</p>
+              <summary>Как оценена связь</summary>
+              <p>Метод: {analysis.method}. Оценка от {formatDateTime(analysis.analyzed_at)}.</p>
+              <p>Слабая связь: 30–54, есть связь: 55–79, сильная связь: 80–100. Ниже 30 связь не подтверждена.</p>
             </details>
           </>
-        )}
+        ) : <p className="hint">Нажмите «Обновить подборку», чтобы сопоставить публикацию с профилем.</p>}
+      </header>
+
+      <section className="detail-block real-card-fact">
+        <div className="real-block-heading"><h3>Что произошло</h3><span className="real-layer-tag fact">Факт · первоисточник</span></div>
+        <p className="hint small">Текст официальной публикации, отдельно от аналитических выводов.</p>
+        {item.excerpt ? (
+          <details className="real-source-text">
+            <summary>{item.excerpt.length > 560 ? item.excerpt.slice(0, 560).trimEnd() + "…" : item.excerpt}</summary>
+            <div className="real-source-full"><p>{item.excerpt}</p></div>
+          </details>
+        ) : <p className="hint">Текст публикации не загружен.</p>}
       </section>
 
       <section className="detail-block">
-        <h3>Разбор для вашего бизнеса</h3>
+        <div className="real-block-heading"><h3>Что это значит для вас</h3><span className="real-layer-tag estimate">Аналитическая оценка</span></div>
         {report ? (
-          <div className="report">
-            <p className="report-summary">{report.summary}</p>
-            <h4>Что это значит для вас</h4>
-            <p>{report.relevance}</p>
-            <div className="report-cols">
-              <div className="report-col risk"><h4>Риски</h4><p>{report.risks}</p></div>
-              <div className="report-col chance"><h4>Возможности</h4><p>{report.opportunities}</p></div>
+          <div className="report real-report">
+            <p className="real-card-lead">{report.summary}</p>
+            <div className="real-report-meaning">
+              <h4>Как событие может повлиять на бизнес</h4>
+              <MarkdownText text={report.relevance} />
+              {report.impact_channel ? <p className="hint small">Канал влияния: {report.impact_channel}</p> : null}
             </div>
-            {report.questions.length ? (
-              <>
-                <h4>Что стоит уточнить</h4>
-                <ul className="reasons">{report.questions.map((question) => <li key={question}>{question}</li>)}</ul>
-              </>
+            <div className="report-cols">
+              <div className="report-col risk"><h4>Потенциальный риск</h4><MarkdownText text={report.risks} /></div>
+              <div className="report-col chance"><h4>Возможность</h4><MarkdownText text={report.opportunities} /></div>
+            </div>
+            <section className="real-next-step">
+              <h4>Что можно сделать</h4>
+              <MarkdownText text={report.next_step || "Проверьте, затрагивают ли изменения ваши договоры, расходы или клиентов, прежде чем принимать решения."} />
+            </section>
+            {report.questions.length > 0 ? (
+              <div className="real-questions">
+                <h4>Что уточнить для более точного вывода</h4>
+                <ul className="reasons">{report.questions.map((question, index) => <li key={index}>{question}</li>)}</ul>
+              </div>
             ) : null}
-            {report.citations.length ? (
-              <p className="report-cites">Основание: {report.citations.map((citation, index) => (
-                <span key={`${citation.url}-${index}`}>{index ? " · " : ""}
-                  {citation.url ? <a href={citation.url} target="_blank" rel="noreferrer">{citation.title}</a> : citation.title}
-                  {citation.published_at ? ` (${citation.published_at})` : ""}
-                </span>
-              ))}</p>
-            ) : null}
-            <p className="report-foot">
-              Сохранён {formatDateTime(report.created_at)}.{" "}
-              <button type="button" className="btn-link" onClick={() => onReport(true)} disabled={reportBusy}>{reportBusy ? "Обновляем…" : "Обновить разбор"}</button>
-            </p>
+            <details className="real-report-evidence">
+              <summary>Источники и ограничения анализа</summary>
+              <p className="hint small">{report.origin === "model" ? "Модель сформировала оценку; числа проверены по переданным материалам." :
+                report.origin === "rules" ? "Вывод по правилам профиля — гипотезы для проверки, не факты о компании." :
+                "Аналитический вывод следует проверить по источнику и данным компании."}</p>
+              {report.citations.length ? <ul className="sources">{report.citations.map((citation, index) =>
+                <li key={index}>{citation.url
+                  ? <a href={citation.url} target="_blank" rel="noreferrer">{citation.title}</a>
+                  : citation.title}
+                  {citation.published_at ? " · " + citation.published_at : ""}
+                </li>)}</ul> : null}
+              {report.evidence_ids.length ? <p className="hint small">Основания: {report.evidence_ids.join(", ")}</p> : null}
+            </details>
+            <p className="report-foot">Разбор от {formatDateTime(report.created_at)} · <button type="button" className="btn-link" onClick={() => onReport(true)} disabled={reportBusy}>{reportBusy ? "Обновляем…" : "Пересчитать разбор"}</button></p>
           </div>
         ) : (
-          <>
-            <p className="hint">Коротко: что произошло, как это может коснуться вашей компании, какие риски и возможности.</p>
+          <div className="real-report-start">
+            <p className="hint">Подготовим разбор по вашему профилю: механизм влияния, риски и возможности, следующий шаг и вопросы для уточнения.</p>
             <button type="button" className="btn btn-primary" onClick={() => onReport(false)} disabled={reportBusy}>
-              {reportBusy ? "Готовим разбор…" : "Разобрать для моей компании"}
+              {reportBusy ? "Анализируем…" : "Разобрать для моей компании"}
             </button>
-          </>
+          </div>
         )}
       </section>
-
       <div className="detail-actions">
         <button type="button" className="btn btn-ghost" onClick={onChat} disabled={chatBusy}>
           {chatBusy ? "Открываем чат…" : "Спросить об этой новости"}
