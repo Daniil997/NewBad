@@ -864,14 +864,21 @@ def _profile_chat_evidence(saved: dict, focused_news_id: str | None) -> list[dic
         "url": "", "published_at": "", "kind": "profile",
     }]
     articles = _fresh_real_news(developer_settings()["news_lookback_days"])
-    selected = next((item for item in articles if item.id == focused_news_id), None)
-    chosen = ([selected] if selected else []) + [item for item in articles if item.id != focused_news_id][:5]
-    for item in chosen[:6]:
+    # Фокусную новость ищем во всём официальном каталоге, а не только в свежей ленте:
+    # открытый пользователем материал должен оставаться контекстом чата после истечения lookback.
+    selected = next(
+        (item for item in load_news() if item.id == focused_news_id and item.status == "imported"),
+        None,
+    ) if focused_news_id else None
+    # В чате по конкретной новости не подмешиваем соседние публикации: они размывают контекст.
+    # В общем чате оставляем свежие материалы, чтобы можно было обсуждать бизнес в целом.
+    chosen = [selected] if focused_news_id and selected else ([] if focused_news_id else articles[:5])
+    for item in chosen:
         evidence.append({
             "evidence_id": f"news:{item.id}", "title": item.title,
             "text": f"{item.title}. {item.excerpt}", "url": item.url,
             "published_at": item.published_at, "kind": "news", "source": item.source or "Официальный источник",
-            "focus": bool(selected and item.id == selected.id),
+            "focus": bool(focused_news_id and item.id == focused_news_id),
         })
     try:
         for index, item in enumerate(market_snapshot().get("items", [])[:5]):
