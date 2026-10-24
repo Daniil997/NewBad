@@ -9,7 +9,7 @@ SOURCE = NewsSource(
     id="cbr_cleanup",
     name="Банк России",
     url="https://www.cbr.ru/rss/RssPress",
-    article_mode="html",
+    article_mode="rss_only",
     min_interval_s=0,
 )
 
