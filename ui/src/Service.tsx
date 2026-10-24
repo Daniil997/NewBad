@@ -407,7 +407,7 @@ export function Service({
                 </select>
               </label>
             ) : null}
-            <button type="button" className="btn btn-secondary" onClick={() => void resetReceivedData()} disabled={resettingData}>
+            <button type="button" className="btn btn-ghost" onClick={() => void resetReceivedData()} disabled={resettingData}>
               {resettingData ? "Сбрасываем…" : "Сбросить полученные данные"}
             </button>
             <button type="button" className="btn btn-primary" onClick={() => setView("profile")} disabled={!profile}>
