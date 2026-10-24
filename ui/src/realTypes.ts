@@ -46,6 +46,7 @@ export const PROFILE_FIELD_LABELS: Record<string, string> = {
   company_name: "Название компании", country: "Страна", region: "Регион", city: "Город",
   description: "Описание бизнеса", industry: "Основная деятельность", industry_tags: "Отраслевые теги",
   products_services: "Товары и услуги", customer_types: "Тип клиентов", business_model: "Модель бизнеса",
+  dependencies: "Зависимости бизнеса", market_geographies: "География рынков и поставок",
 };
 
 export const EMPTY_PROFILE: BusinessProfile = {
