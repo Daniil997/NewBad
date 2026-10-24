@@ -179,3 +179,19 @@ def test_catalog_diagnostics_distinguish_age_from_invalid_news(tmp_path, monkeyp
     assert row["rejected"] == 0
     assert row["imported"] == 1
     assert row["article_fetches"] == 0
+
+
+def test_old_only_feed_is_not_reported_as_broken(tmp_path):
+    old_rss = feed(item(
+        "Давнее решение регулятора",
+        "Fri, 11 Sep 2026 13:30:00 +0300", 99,
+    ))
+    batch = import_news(
+        tmp_path, source=SOURCE.model_copy(update={"article_mode": "rss_only"}),
+        fetch=lambda: old_rss, loaded_on=date(2026, 10, 24),
+        min_interval_s=0, max_age_days=14,
+    )
+    assert batch.status == "outside_window"
+    assert not batch.items
+    assert batch.seen == 1
+    assert batch.rejected[0].reason == "старше окна сбора"
