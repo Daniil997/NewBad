@@ -22,8 +22,10 @@ MAX_FIELDS = {
     "products_services": 1000,
     "customer_types": 400,
     "business_model": 400,
+    "dependencies": 1000,
+    "market_geographies": 8,
 }
-TEXT_FIELDS = set(MAX_FIELDS) - {"industry_tags"}
+TEXT_FIELDS = set(MAX_FIELDS) - {"industry_tags", "market_geographies"}
 NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
 MAX_JSON_ATTEMPTS = 3
 logger = logging.getLogger(__name__)
@@ -56,14 +58,20 @@ def extract_profile_suggestions(pages: list[SitePage], current_profile: dict) ->
         "Верни только JSON вида {\"suggestions\":[{\"field\":\"...\",\"value\":\"...\","
         "\"evidence\":\"точная цитата со страницы\",\"source_index\":0,\"confidence\":\"high|medium\"}]}. "
         "Не больше 8 предложений. Цитата evidence — не длиннее 180 символов и обязана дословно встречаться в тексте. "
-        "У каждого предложения есть confidence: high или medium. "
+        "У каждого предложения есть confidence: high или medium. Если сведений нет, пропусти поле. "
+        "Для dependencies перечисляй только прямо названные зависимости от сырья, поставок или оборудования; "
+        "для market_geographies — массив только явно перечисленных рынков сбыта/поставок, не адресов филиалов. "
+        "Для industry_tags — массив только отраслей, которые подтверждены конкретной формулировкой страницы. "
         "Один объект — одно поле. "
         "Если достоверной цитаты нет, поле пропусти. Не извлекай финансовые показатели, ИНН, ОКВЭД, "
         "контакты, оценки потребностей/интересов, прогнозы или юридические выводы. "
         "industry_tags допускает только ID из переданного словаря. Не возвращай ключи вне разрешённого списка."
     )
+    empty_fields = sorted(field for field in MAX_FIELDS if _is_empty(current_profile.get(field)))
+    if not empty_fields:
+        return ExtractionResult([], route.model, route.provider, "Все доступные для извлечения поля уже заполнены.")
     user_payload = {
-        "allowed_fields": sorted(MAX_FIELDS),
+        "allowed_fields": empty_fields,
         "industry_tags": REAL_PROFILE_TAXONOMY["industry_tags"],
         "pages": model_pages,
     }
@@ -147,16 +155,21 @@ def extract_profile_suggestions(pages: list[SitePage], current_profile: dict) ->
 
 
 def _trim_pages(pages: list[SitePage]) -> list[dict]:
+    """Distribute context across pages rather than letting a long home page monopolize it."""
+    selected = [page for page in pages if page.text.strip()][:10]
+    if not selected:
+        return []
     remaining = MAX_PROMPT_CHARS
     result: list[dict] = []
-    for index, page in enumerate(pages):
-        fixed = len(page.url) + len(page.title) + 100
-        available = min(6000, remaining - fixed)
-        if available < 300:
+    for index, page in enumerate(selected):
+        reserved = len(page.url) + len(page.title) + 100
+        pages_left = len(selected) - index
+        allowance = min(6000, max(0, (remaining // pages_left) - reserved))
+        if allowance < 240:
             break
-        text = page.text[:available]
+        text = page.text[:allowance]
         result.append({"index": index, "url": page.url, "title": page.title, "text": text})
-        remaining -= fixed + len(text)
+        remaining -= reserved + len(text)
     return result
 
 
@@ -184,13 +197,27 @@ def _validate_suggestions(raw: list, pages: list[dict], current_profile: dict) -
             value = _clean(value, MAX_FIELDS[field])
             if not value or not _numbers_supported(value, evidence):
                 continue
-            if field in {"company_name", "country", "region", "city", "industry"} and _normal(value) not in _normal(evidence):
+            if field in {"company_name", "country", "region", "city", "industry"}:
+                if _normal(value) not in _normal(evidence):
+                    continue
+            elif not _supported_description(value, evidence):
                 continue
         else:
             if not isinstance(value, list) or len(value) > MAX_FIELDS[field]:
                 continue
-            value = list(dict.fromkeys(item for item in value if isinstance(item, str) and item in allowed_tags))
-            if not value or not _numbers_supported(" ".join(value), evidence):
+            if field == "industry_tags":
+                if any(not isinstance(tag, str) or tag not in allowed_tags for tag in value):
+                    continue
+                value = list(dict.fromkeys(value))
+                if not value or not all(_tag_supported(tag, evidence) for tag in value):
+                    continue
+            else:
+                if any(not isinstance(place, str) or not place.strip() or len(place.strip()) > 80 for place in value):
+                    continue
+                value = list(dict.fromkeys(place.strip() for place in value))
+                if not value or not all(_normal(place) in _normal(evidence) for place in value):
+                    continue
+            if not _numbers_supported(" ".join(value), evidence):
                 continue
         confidence_label = item.get("confidence")
         confidence = {"high": 0.9, "medium": 0.6}.get(confidence_label)
@@ -208,6 +235,53 @@ def _validate_suggestions(raw: list, pages: list[dict], current_profile: dict) -
         )
         seen_fields.add(field)
     return result
+
+
+# Coarse, deliberately conservative corroboration for translated taxonomy tags.
+# A taxonomy label alone is not enough unless its subject appears in the source.
+TAG_KEYWORDS = {
+    "trade": ("торгов", "прода", "магазин", "retail", "wholesale"),
+    "manufacturing": ("производ", "выпуска", "изготавли", "manufactur"),
+    "construction": ("строитель", "строим", "ремонт", "construction"),
+    "transport_logistics": ("логист", "перевоз", "достав", "транспорт"),
+    "agriculture": ("сельск", "агро", "фермер", "agricultur"),
+    "it_communications": ("программ", "разработ", "it-", "связь", "software"),
+    "business_services": ("консалт", "бизнес-услуг", "аудит", "consult"),
+    "consumer_services": ("услуги населени", "для частных", "сервис для", "consumer"),
+    "real_estate": ("недвижим", "аренда объект", "real estate"),
+    "energy_raw_materials": ("энергет", "нефт", "газов", "сырья", "energy"),
+    "health_education": ("медицин", "образован", "обучени", "health"),
+    "hospitality_tourism": ("турист", "гостиниц", "отел", "ресторан", "hotel"),
+}
+
+
+def _tag_supported(tag: str, evidence: str) -> bool:
+    folded = evidence.casefold().replace("ё", "е")
+    keywords = TAG_KEYWORDS.get(tag)
+    if keywords is None:
+        return False  # "other" must be chosen by the business owner.
+    return any(token in folded for token in keywords)
+
+
+_PROFILE_STOPWORDS = {"компания", "компании", "наша", "нашего", "также", "которые", "бизнеса", "услуги"}
+
+
+def _supported_description(value: str, evidence: str) -> bool:
+    """Block unsupported business descriptions without requiring word-for-word copies."""
+    def stems(text: str) -> set[str]:
+        return {
+            token[:5] for token in re.findall(r"[a-zа-яё]{5,}", text.casefold().replace("ё", "е"))
+            if token not in _PROFILE_STOPWORDS
+        }
+
+    proposed = stems(value)
+    quoted = stems(evidence)
+    if not proposed:
+        return False
+    common = proposed & quoted
+    # A paraphrase still needs at least two matching meaningful concepts,
+    # and most of its content must be attributable to the cited passage.
+    return len(common) >= min(2, len(proposed)) and len(common) / len(proposed) >= 0.5
 
 
 def _is_empty(value: object) -> bool:
