@@ -386,6 +386,14 @@ def developer_settings() -> dict:
         }
         for space in DEFAULT_DEVELOPER_SETTINGS["task_routes"]
     }
+    # Migrate old installations that configured one model for the whole demo card.
+    stored_demo_routes = stored.get("task_routes", {}).get("demo") or {}
+    if "news_card" in stored_demo_routes:
+        for task in ("news_card_fact", "news_card_copy"):
+            if task not in stored_demo_routes:
+                merged["task_routes"]["demo"][task] = (
+                    "mock" if stored_demo_routes["news_card"] == "inherit" else stored_demo_routes["news_card"]
+                )
     return merged
 
 
@@ -395,6 +403,14 @@ def save_developer_settings(settings: dict) -> dict:
         space: {**DEFAULT_DEVELOPER_SETTINGS["task_routes"][space], **(settings.get("task_routes", {}).get(space) or {})}
         for space in DEFAULT_DEVELOPER_SETTINGS["task_routes"]
     }
+    # Older clients may still submit only the original news_card route.
+    supplied_demo_routes = settings.get("task_routes", {}).get("demo") or {}
+    if "news_card" in supplied_demo_routes:
+        for task in ("news_card_fact", "news_card_copy"):
+            if task not in supplied_demo_routes:
+                merged["task_routes"]["demo"][task] = (
+                    "mock" if supplied_demo_routes["news_card"] == "inherit" else supplied_demo_routes["news_card"]
+                )
     with connect_app() as connection:
         connection.execute(
             "INSERT INTO developer_settings (id, settings_json, updated_at) VALUES (1, ?, ?) "
