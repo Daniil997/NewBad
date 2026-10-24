@@ -358,7 +358,7 @@ class SettingsUpdate(BaseModel):
     @field_validator("task_routes")
     @classmethod
     def valid_task_routes(cls, values: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
-        expected = {"real": {"profile_site", "news_report", "news_selection", "chat"}, "demo": {"news_card", "chat"}}
+        expected = {"real": {"profile_site", "news_report", "news_selection", "chat"}, "demo": {"news_card", "news_card_fact", "news_card_copy", "chat"}}
         allowed = {"mock", "local_gemma", "local_qwen", "cloud_gemma", "cloud_glm", "cloud_qwen", "cloud_deepseek", "cloud_vl", "cloud_kimi"}
         if not values:
             return values
@@ -1508,6 +1508,27 @@ def clear_news_database() -> dict:
     """Delete only collected news articles so the next collection can rebuild them."""
     removed = clear_stored_news()
     return {"status": "complete", "removed": removed, "stored_count": stored_news_count()}
+
+
+@app.post("/api/settings/demo/reset")
+def reset_demo_data() -> dict:
+    """Clear runtime results from the demo journal while preserving bundled source fixtures."""
+    init_db()
+    tables = (
+        "tool_calls", "llm_calls", "feed_cache", "agent_steps",
+        "pasted_news", "chat_turns", "user_feedback",
+    )
+    removed_by_table: dict[str, int] = {}
+    with connect() as connection:
+        for table in tables:
+            # Table names come only from the fixed allowlist above.
+            removed_by_table[table] = int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            connection.execute(f"DELETE FROM {table}")
+    return {
+        "status": "complete",
+        "removed": sum(removed_by_table.values()),
+        "removed_by_table": removed_by_table,
+    }
 
 
 @app.get("/api/settings/market/status")
