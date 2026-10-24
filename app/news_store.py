@@ -28,8 +28,14 @@ def store_imported_news(source_id: str, items: list[dict]) -> int:
                 "SELECT id, text FROM news_articles WHERE url = ?", (item["url"],)
             ).fetchone()
             if existing:
-                # Preserve the stable record ID but enrich its body if the extractor found more content.
-                if len(item["text"]) > len(existing["text"]):
+                # Preserve the stable record ID. Replace known CBR section-page contamination
+                # even when the clean RSS summary is shorter than the previously stored page.
+                existing_text = existing["text"].casefold()
+                contaminated = (
+                    "страница была полезной?" in existing_text
+                    and "последнее обновление страницы" in existing_text
+                )
+                if len(item["text"]) > len(existing["text"]) or contaminated:
                     connection.execute(
                         "UPDATE news_articles SET text = ?, sha256 = ?, loaded_at = ? WHERE id = ?",
                         (item["text"], item["sha256"], item["loaded_at"], existing["id"]),

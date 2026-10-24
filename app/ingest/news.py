@@ -530,6 +530,9 @@ class _ArticleTextParser(HTMLParser):
         self.stack: list[tuple[str, bool, int | None]] = []
         self.active: list[int] = []
         self.candidates: list[tuple[int, list[str]]] = []
+        self.anchor_depth = 0
+        self.anchor_count = 0
+        self.anchor_chars = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attrs_map = {key.casefold(): (value or "").casefold() for key, value in attrs}
@@ -548,6 +551,9 @@ class _ArticleTextParser(HTMLParser):
                 self.candidates.append((score, []))
                 self.active.append(candidate_id)
         self.stack.append((tag, skipped, candidate_id))
+        if not skipped and tag == "a":
+            self.anchor_depth += 1
+            self.anchor_count += 1
         if not skipped and tag in self._BLOCK:
             self._append("\\n")
 
@@ -558,6 +564,8 @@ class _ArticleTextParser(HTMLParser):
         popped = self.stack[match:]
         del self.stack[match:]
         for _tag, _skipped, candidate_id in reversed(popped):
+            if _tag == "a":
+                self.anchor_depth = max(0, self.anchor_depth - 1)
             if candidate_id is not None and candidate_id in self.active:
                 self.active.remove(candidate_id)
         if tag in self._BLOCK:
@@ -570,6 +578,8 @@ class _ArticleTextParser(HTMLParser):
         if not cleaned:
             return
         self.body.append(cleaned)
+        if self.anchor_depth:
+            self.anchor_chars += len(cleaned)
         for candidate_id in self.active:
             self.candidates[candidate_id][1].append(cleaned)
 
@@ -581,6 +591,22 @@ class _ArticleTextParser(HTMLParser):
 
     def text(self) -> str:
         body = _SPACE.sub(" ", " ".join(self.body)).strip()
+        folded = body.casefold()
+        # CBR RSS sometimes links to a section/index page rather than an individual
+        # publication. Such pages contain many linked document titles and page chrome;
+        # importing the whole listing as the article body pollutes search and AI analysis.
+        page_chrome = (
+            "страница была полезной?" in folded
+            and ("последнее обновление страницы" in folded or "публичное обсуждение" in folded)
+        )
+        link_heavy_listing = (
+            self.anchor_count >= 10
+            and self.anchor_chars >= 400
+            and len(body) >= 700
+            and self.anchor_chars / max(len(body), 1) >= 0.35
+        )
+        if page_chrome or link_heavy_listing:
+            return ""
         eligible = [
             (score, _SPACE.sub(" ", " ".join(parts)).strip())
             for score, parts in self.candidates
