@@ -18,7 +18,7 @@ DEFAULT_DEVELOPER_SETTINGS = {
     "validate_numeric_grounding": True,
     "task_routes": {
         "real": {"profile_site": "mock", "news_report": "mock", "news_selection": "mock", "chat": "mock"},
-        "demo": {"news_card": "mock", "chat": "mock"},
+        "demo": {"news_card": "mock", "news_card_fact": "mock", "news_card_copy": "mock", "chat": "mock"},
     },
     "news_lookback_days": 3,
     "news_retention_days": 90,
