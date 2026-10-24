@@ -7,7 +7,7 @@ import {
   type SavedProfile, type SiteSuggestion, type User,
 } from "./realTypes";
 import {
-  ChatPanel, CurrencyRatesPanel, isCurrencyRatesNews, MarketsPanel, NewsDetail, NewsList, ProfileForm, SuggestionsPanel,
+  ChatPanel, CurrencyRatesPanel, isCurrencyRatesNews, MarketsPanel, NewsDetail, NewsList, ProfileForm, ProfileSourcesPanel, SuggestionsPanel,
 } from "./RealParts";
 
 export function RealMode({
@@ -42,6 +42,7 @@ export function RealMode({
   const [siteScanPages, setSiteScanPages] = useState<{ url: string; title: string }[]>([]);
   const [siteScanned, setSiteScanned] = useState(false);
   const [siteSuggestions, setSiteSuggestions] = useState<SiteSuggestion[]>([]);
+  const [profileSources, setProfileSources] = useState<SiteSuggestion[]>([]);
   const [realFeed, setRealFeed] = useState<RealFeed | null>(null);
   const [realMarkets, setRealMarkets] = useState<RealMarkets | null>(null);
   const [marketHistories, setMarketHistories] = useState<Record<string, MarketHistory>>({});
@@ -127,17 +128,21 @@ export function RealMode({
   }, [notice]);
 
   async function loadProfile(): Promise<void> {
-    const [response, optionsResponse, suggestionsResponse] = await Promise.all([
+    const [response, optionsResponse, suggestionsResponse, sourcesResponse] = await Promise.all([
       fetch("/api/real/profile"),
       fetch("/api/real/profile/options"),
       fetch("/api/real/profile/suggestions"),
+      fetch("/api/real/profile/sources"),
     ]);
     if (!response.ok) throw new Error("Не удалось загрузить профиль компании");
     if (!optionsResponse.ok) throw new Error("Не удалось загрузить варианты профиля");
     if (!suggestionsResponse.ok) throw new Error("Не удалось загрузить предложения сайта");
+    if (!sourcesResponse.ok) throw new Error("Не удалось загрузить источники полей профиля");
     const payload = (await response.json()) as { profile: SavedProfile };
     setProfileOptions((await optionsResponse.json()) as ProfileOptions);
     const suggestions = ((await suggestionsResponse.json()) as { suggestions: SiteSuggestion[] }).suggestions;
+    const sources = ((await sourcesResponse.json()) as { sources: SiteSuggestion[] }).sources;
+    setProfileSources(sources);
     const savedProfile = payload.profile;
     setSiteSuggestions(suggestions);
     setProfile({ ...EMPTY_PROFILE, ...savedProfile });
@@ -392,12 +397,14 @@ export function RealMode({
         method: "POST", headers: { "X-CSRF-Token": csrfToken },
       });
       const payload = (await response.json().catch(() => null)) as {
-        profile?: SavedProfile; filled_fields?: string[]; suggestions?: SiteSuggestion[]; detail?: string;
+        profile?: SavedProfile; filled_fields?: string[]; suggestions?: SiteSuggestion[];
+        sources?: SiteSuggestion[]; detail?: string;
       } | null;
       if (!response.ok || !payload?.profile) throw new Error(payload?.detail || "Не удалось заполнить профиль");
       setProfile({ ...EMPTY_PROFILE, ...payload.profile });
       setProfileMeta(payload.profile);
       setSiteSuggestions(payload.suggestions ?? []);
+      setProfileSources(payload.sources ?? []);
       const fields = (payload.filled_fields ?? []).map((field) => PROFILE_FIELD_LABELS[field] ?? field);
       setNotice(fields.length
         ? `Подтверждены и записаны: ${fields.join(", ")}. Проверьте результат перед продолжением.`
@@ -428,10 +435,12 @@ export function RealMode({
         }),
       });
       const payload = (await response.json().catch(() => null)) as {
-        status?: string; profile?: SavedProfile | null; suggestions?: SiteSuggestion[]; detail?: string;
+        status?: string; profile?: SavedProfile | null; suggestions?: SiteSuggestion[];
+        sources?: SiteSuggestion[]; detail?: string;
       } | null;
       if (!response.ok || !payload) throw new Error(payload?.detail || "Не удалось сохранить решение");
       setSiteSuggestions(payload.suggestions ?? []);
+      setProfileSources(payload.sources ?? []);
       if (payload.profile) {
         setProfile({ ...EMPTY_PROFILE, ...payload.profile });
         setProfileMeta(payload.profile);
@@ -618,6 +627,7 @@ export function RealMode({
             onDecide={(suggestion, accept) => void decideSuggestion(suggestion, accept)}
             onAcceptAll={() => void acceptAllSiteSuggestions()}
           />
+          <ProfileSourcesPanel sources={profileSources} profile={profile} fieldLabels={PROFILE_FIELD_LABELS} label={suggestionLabel} />
           <ProfileForm
             profile={profile} options={profileOptions} busy={profileBusy} dirty={profileDirty}
             siteConsent={siteConsent} siteBusy={siteBusy} onConsent={setSiteConsent} onAnalyzeSite={() => void analyzeWebsite()}
