@@ -156,3 +156,26 @@ def test_redirect_to_foreign_host_is_blocked_before_request(monkeypatch):
     with pytest.raises(ingest.NewsIngestError, match="перенаправление"):
         ingest._fetch_rss("https://www.cbr.ru/rss/RssPress", 5)
     assert seen == ["https://www.cbr.ru/rss/RssPress"]
+
+
+def test_catalog_diagnostics_distinguish_age_from_invalid_news(tmp_path, monkeypatch):
+    from datetime import timedelta
+
+    fresh = date.today()
+    old = fresh - timedelta(days=40)
+    formatted = lambda day: day.strftime("%a, %d %b %Y 12:00:00 +0300")
+    xml = feed(
+        item("Старое решение Банка России", formatted(old), 27),
+        item("Актуальное решение Банка России", formatted(fresh), 28),
+    )
+    monkeypatch.setattr(ingest, "load_news_sources", lambda: [
+        SOURCE.model_copy(update={"article_mode": "rss_only"})
+    ])
+    monkeypatch.setattr(ingest, "_fetch_rss", lambda _url, _timeout: xml)
+    report = ingest.import_news_catalog(tmp_path / "unused", max_age_days=14)
+    row = report.sources[0]
+    assert row["seen"] == 2
+    assert row["skipped_old"] == 1
+    assert row["rejected"] == 0
+    assert row["imported"] == 1
+    assert row["article_fetches"] == 0
