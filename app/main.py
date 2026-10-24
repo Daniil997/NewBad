@@ -49,6 +49,7 @@ from app.personal_feed import (
 )
 from app.user_store import (
     business_profile_for_owner,
+    accepted_profile_sources,
     claim_site_analysis,
     create_session,
     create_user,
@@ -1059,6 +1060,12 @@ def real_profile_suggestions(request: Request) -> dict:
     return {"suggestions": pending_profile_suggestions(user["id"])}
 
 
+@app.get("/api/real/profile/sources")
+def real_profile_sources(request: Request) -> dict:
+    user = _require_user(request)
+    return {"sources": accepted_profile_sources(user["id"])}
+
+
 @app.post("/api/real/profile/site-analysis")
 def analyze_real_profile_site(body: SiteAnalysisRequest, request: Request) -> dict:
     _check_csrf(request)
@@ -1180,6 +1187,7 @@ def apply_real_profile_suggestions(request: Request) -> dict:
         "profile": _profile_view(saved),
         "filled_fields": filled_fields,
         "suggestions": pending_profile_suggestions(user["id"]),
+        "sources": accepted_profile_sources(user["id"]),
     }
 
 
@@ -1224,6 +1232,7 @@ def decide_real_profile_suggestion(body: ProfileSuggestionDecision, request: Req
         "status": result,
         "profile": _profile_view(saved) if saved else None,
         "suggestions": pending_profile_suggestions(user["id"]),
+        "sources": accepted_profile_sources(user["id"]),
     }
 
 
