@@ -87,7 +87,9 @@ def test_demo_reset_clears_runtime_data_but_keeps_static_fixtures(monkeypatch, t
         )
     with TestClient(app) as client:
         response = client.post("/api/settings/demo/reset")
+        static_profile = client.get("/api/clients/U-BORROWER")
     assert response.status_code == 200
+    assert static_profile.status_code == 200
     assert response.json()["removed"] >= 2
     with connect() as connection:
         assert connection.execute("SELECT COUNT(*) FROM chat_turns").fetchone()[0] == 0
