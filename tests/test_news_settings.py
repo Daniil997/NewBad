@@ -33,7 +33,7 @@ def test_task_model_settings_round_trip_and_reject_unknown_models(monkeypatch, t
     monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "task-routes.sqlite3"))
     routes = {
         "real": {"profile_site": "local_gemma", "news_report": "cloud_gemma", "news_selection": "local_qwen", "chat": "mock"},
-        "demo": {"news_card": "mock", "chat": "local_qwen"},
+        "demo": {"news_card": "mock", "news_card_fact": "local_gemma", "news_card_copy": "cloud_qwen", "chat": "local_qwen"},
     }
     with TestClient(app) as client:
         saved = client.post("/api/settings", json={
@@ -56,7 +56,7 @@ def test_task_route_save_does_not_require_or_reset_legacy_global_model_settings(
     monkeypatch.setenv("LLM_PLACEMENT", "gpu")
     routes = {
         "real": {"profile_site": "local_gemma", "news_report": "mock", "news_selection": "local_gemma", "chat": "mock"},
-        "demo": {"news_card": "local_qwen", "chat": "mock"},
+        "demo": {"news_card": "local_qwen", "news_card_fact": "local_qwen", "news_card_copy": "local_gemma", "chat": "mock"},
     }
 
     with TestClient(app) as client:
@@ -69,6 +69,29 @@ def test_task_route_save_does_not_require_or_reset_legacy_global_model_settings(
     assert __import__("os").environ["LLM_MODE"] == "local_dual"
     assert __import__("os").environ["ALLOW_CLOUD"] == "true"
     assert __import__("os").environ["LLM_PLACEMENT"] == "gpu"
+
+
+def test_demo_reset_clears_runtime_data_but_keeps_static_fixtures(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from app.db import connect, init_db
+
+    init_db()
+    with connect() as connection:
+        connection.execute(
+            "INSERT INTO chat_turns (client_id, event_id, role, text, created_at) VALUES (?, ?, ?, ?, ?)",
+            ("U-BORROWER", "cbr-rate-14", "user", "test question", "2026-10-24T10:00:00+00:00"),
+        )
+        connection.execute(
+            "INSERT INTO user_feedback (client_id, event_id, helpful, created_at) VALUES (?, ?, ?, ?)",
+            ("U-BORROWER", "cbr-rate-14", 1, "2026-10-24T10:00:00+00:00"),
+        )
+    with TestClient(app) as client:
+        response = client.post("/api/settings/demo/reset")
+    assert response.status_code == 200
+    assert response.json()["removed"] >= 2
+    with connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM chat_turns").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM user_feedback").fetchone()[0] == 0
 
 
 def test_manual_news_collection_reports_per_source_results(monkeypatch, tmp_path):
