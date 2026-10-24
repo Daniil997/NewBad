@@ -872,7 +872,9 @@ def _profile_chat_evidence(saved: dict, focused_news_id: str | None) -> list[dic
     ) if focused_news_id else None
     # В чате по конкретной новости не подмешиваем соседние публикации: они размывают контекст.
     # В общем чате оставляем свежие материалы, чтобы можно было обсуждать бизнес в целом.
-    chosen = [selected] if focused_news_id and selected else ([] if focused_news_id else articles[:5])
+    if focused_news_id and selected is None:
+        raise HTTPException(status_code=404, detail="Выбранная новость больше недоступна")
+    chosen = [selected] if focused_news_id else articles[:5]
     for item in chosen:
         evidence.append({
             "evidence_id": f"news:{item.id}", "title": item.title,
