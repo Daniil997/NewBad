@@ -1106,6 +1106,7 @@ def analyze_real_profile_site(body: SiteAnalysisRequest, request: Request) -> di
             "suggestions": pending_profile_suggestions(user["id"]),
             "warnings": crawl.warnings,
             "pages_scanned": 0,
+            "pages": [],
         }
     try:
         extracted = extract_profile_suggestions(crawl.pages, profile)
@@ -1138,6 +1139,7 @@ def analyze_real_profile_site(body: SiteAnalysisRequest, request: Request) -> di
         "suggestions": suggestions,
         "warnings": warnings,
         "pages_scanned": len(crawl.pages),
+        "pages": [{"title": page.title, "url": page.url} for page in crawl.pages],
         "opened_url": getattr(crawl, "opened_url", ""),
         "model": extracted.model,
         "provider": extracted.provider,
