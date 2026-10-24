@@ -28,6 +28,15 @@ type MarketStatus = {
   items: { category: string; instrument: string; name: string; price: number; change_pct: number | null; currency: string; unit: string; source_timestamp: string; observed_at: string }[];
 };
 const MARKET_CATEGORY_LABELS: Record<string, string> = { currencies: "Валюты", equities: "Акции", metals: "Металлы" };
+const NEWS_IMPORT_STATUS: Record<string, string> = {
+  imported: "загружены новые",
+  duplicate: "без новых публикаций",
+  outside_window: "вне выбранного периода",
+  rejected: "нет материалов подходящего качества",
+  empty: "лента пуста",
+  error: "ошибка загрузки",
+};
+
 
 const TASK_ROUTE_OPTIONS = [
   ["mock", "Заглушка (без вызова модели)"],
@@ -324,7 +333,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
           {newsStatus.latest ? <>
             <p>Последний запуск: {new Date(newsStatus.latest.finished_at).toLocaleString("ru-RU")} · {newsStatus.latest.status}</p>
             <ul>{newsStatus.latest.sources.map((item) => <li key={item.source}>
-              <strong>{item.source}</strong>: {item.status}; записей RSS {item.seen ?? "—"}, HTML-страниц обработано {item.article_fetches ?? "—"}, новых {item.imported}, дублей {item.duplicates}, за пределами периода {item.skipped_old ?? 0}, отклонено из-за качества {item.rejected}{item.skipped_future ? `, с будущей датой ${item.skipped_future}` : ""}{item.error ? ` (ошибка: ${item.error})` : ""}
+              <strong>{item.source}</strong>: {NEWS_IMPORT_STATUS[item.status] ?? item.status}; записей RSS {item.seen ?? "—"}, HTML-страниц обработано {item.article_fetches ?? "—"}, новых {item.imported}, дублей {item.duplicates}, за пределами периода {item.skipped_old ?? 0}, отклонено из-за качества {item.rejected}{item.skipped_future ? `, с будущей датой ${item.skipped_future}` : ""}{item.error ? ` (ошибка: ${item.error})` : ""}
               {item.rejection_reasons && Object.keys(item.rejection_reasons).length ? <ul>
                 {Object.entries(item.rejection_reasons).sort((a, b) => b[1] - a[1]).map(([reason, count]) => <li key={reason}>{reason}: {count}</li>)}
               </ul> : null}
