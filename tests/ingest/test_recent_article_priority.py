@@ -1,0 +1,97 @@
+"""News ingestion must prioritize recent articles and preserve distinct updates."""
+
+from datetime import date
+from html import escape
+
+from app.ingest import news as ingest
+from app.ingest.news import NewsSource, import_news
+
+
+SOURCE = NewsSource(
+    id="fresh-first-test", name="Тестовая RSS-лента",
+    url="https://www.cbr.ru/rss/RssPress", article_mode="html", min_interval_s=0,
+)
+
+
+def item(name: str, day: str, number: int) -> str:
+    text = "Опубликованы новые официальные условия работы финансовых организаций и участников рынка."
+    return (
+        "<item><title>" + escape(name) + "</title>"
+        "<link>https://www.cbr.ru/news/?id=" + str(number) + "</link>"
+        "<guid>fresh_" + str(number) + "</guid>"
+        "<pubDate>" + day + "</pubDate>"
+        "<description>" + text + "</description></item>"
+    )
+
+
+def feed(*items: str) -> str:
+    return "<rss><channel>" + "".join(items) + "</channel></rss>"
+
+
+def test_stale_items_do_not_consume_full_article_fetch_budget(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_MAX_ARTICLE_FETCHES", 1)
+    seen: list[str] = []
+    article_body = "<article><p>" + ("Основные положения решения Банка России и условия применения. " * 12) + "</p></article>"
+
+    def get_article(url: str) -> str:
+        seen.append(url)
+        return article_body
+
+    rss = feed(
+        item("Старое сообщение о рынке", "Fri, 11 Sep 2026 13:30:00 +0300", 1),
+        item("Новое решение о рынке", "Sat, 24 Oct 2026 12:00:00 +0300", 2),
+    )
+    result = import_news(
+        tmp_path, source=SOURCE, fetch=lambda: rss, fetch_article=get_article,
+        loaded_on=date(2026, 10, 24), min_interval_s=0, max_age_days=14,
+    )
+    assert len(seen) == 1 and seen[0].endswith("id=2")
+    assert len(result.items) == 1
+    assert len(result.items[0].text) > 300
+    assert result.rejected[0].reason == "старше окна сбора"
+
+
+def test_newest_recent_items_receive_fetch_priority(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "_MAX_ARTICLE_FETCHES", 1)
+    seen: list[str] = []
+    rss = feed(
+        item("Прошлая новость о финансировании", "Thu, 22 Oct 2026 12:00:00 +0300", 3),
+        item("Самая свежая новость о финансировании", "Sat, 24 Oct 2026 12:00:00 +0300", 4),
+    )
+    result = import_news(
+        tmp_path, source=SOURCE, fetch=lambda: rss,
+        fetch_article=lambda url: seen.append(url) or "<article><p>" + ("Текст публикации с фактами. " * 30) + "</p></article>",
+        loaded_on=date(2026, 10, 24), min_interval_s=0, max_age_days=14,
+    )
+    assert seen == ["https://www.cbr.ru/news/?id=4"]
+    assert len(result.items) == 2
+
+
+def test_same_title_different_dates_is_not_falsely_deduplicated(tmp_path):
+    rss = feed(
+        item("Ежедневная информация об операциях финансового рынка", "Fri, 23 Oct 2026 12:00:00 +0300", 5),
+        item("Ежедневная информация об операциях финансового рынка", "Sat, 24 Oct 2026 12:00:00 +0300", 6),
+    )
+    result = import_news(
+        tmp_path, source=SOURCE.model_copy(update={"article_mode": "rss_only"}),
+        fetch=lambda: rss, loaded_on=date(2026, 10, 24), min_interval_s=0,
+    )
+    assert len([item for item in result.items if item.status == "imported"]) == 2
+
+
+def test_atom_entry_with_href_and_iso_date_is_supported(tmp_path):
+    xml = (
+        '<feed xmlns="http://www.w3.org/2005/Atom"><entry>'
+        "<id>tag:cbr.ru,2026:atom-1</id><title>Новое решение регулятора</title>"
+        '<link rel="alternate" href="https://www.cbr.ru/press/event/?id=atom"/>'
+        "<published>2026-10-24T12:00:00+03:00</published>"
+        "<summary>Банк России представил новый документ с условиями работы на финансовом рынке.</summary>"
+        "</entry></feed>"
+    )
+    result = import_news(
+        tmp_path, source=SOURCE.model_copy(update={"article_mode": "rss_only"}),
+        fetch=lambda: xml, loaded_on=date(2026, 10, 24), min_interval_s=0, max_age_days=14,
+    )
+    assert result.status == "imported"
+    assert result.items[0].url.endswith("id=atom")
+    assert result.items[0].published_at == "2026-10-24"
