@@ -10,7 +10,7 @@ from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 from xml.etree import ElementTree
 
 import httpx
@@ -360,10 +360,36 @@ def migrate_legacy_imports(output: Path) -> int:
     return moved
 
 
+def _get_official_page(url: str, timeout_s: float, headers: dict[str, str]) -> httpx.Response:
+    """Follow only bounded same-site HTTPS redirects from official sources."""
+    original = urlsplit(url)
+    root_host = (original.hostname or "").casefold().removeprefix("www.")
+    allowed = {root_host, f"www.{root_host}"}
+    current_url = url
+    for _ in range(4):
+        response = httpx.get(
+            current_url, timeout=timeout_s, follow_redirects=False, headers=headers,
+        )
+        if response.status_code not in {301, 302, 303, 307, 308}:
+            return response
+        location = response.headers.get("location", "")
+        if not location:
+            raise ValueError("Перенаправление без адреса")
+        destination = urljoin(current_url, location)
+        target = urlsplit(destination)
+        if (
+            target.scheme != "https" or (target.hostname or "").casefold() not in allowed
+            or target.username or target.password or target.port not in (None, 443)
+        ):
+            raise ValueError("Перенаправление на другой или небезопасный сайт")
+        current_url = destination
+    raise ValueError("Превышен лимит перенаправлений официального источника")
+
+
 def _fetch_rss(url: str, timeout_s: float) -> str:
     for attempt in range(3):
         try:
-            response = httpx.get(url, timeout=timeout_s, follow_redirects=False, headers={"User-Agent": "NewBad/0.1"})
+            response = _get_official_page(url, timeout_s, {"User-Agent": "NewBad/0.1"})
             response.raise_for_status()
             if len(response.content) > 2 * 1024 * 1024:
                 raise NewsIngestError("source", "RSS-лента превышает лимит 2 МиБ")
@@ -377,6 +403,8 @@ def _fetch_rss(url: str, timeout_s: float) -> str:
         except httpx.HTTPError as error:
             if attempt == 2:
                 raise NewsIngestError("source", f"Источник недоступен: {error.__class__.__name__}") from error
+        except ValueError as error:
+            raise NewsIngestError("source", f"Некорректное перенаправление RSS: {error}") from error
         time.sleep(0.25 * (2 ** attempt))
     raise NewsIngestError("source", "Источник недоступен")
 
@@ -746,9 +774,9 @@ def _fetch_article(url: str, source: NewsSource, timeout_s: float) -> str | None
     if parsed.scheme != "https" or article_host not in allowed_hosts or parsed.username or parsed.password:
         logger.warning("news-article-extract-skipped source=%s reason=host_not_allowed", source.id)
         return None
-    response = httpx.get(
-        url, timeout=timeout_s, follow_redirects=False,
-        headers={"User-Agent": "NewBad/0.1 (+official RSS article extraction)", "Accept": "text/html,application/xhtml+xml"},
+    response = _get_official_page(
+        url, timeout_s,
+        {"User-Agent": "NewBad/0.1 (+official RSS article extraction)", "Accept": "text/html,application/xhtml+xml"},
     )
     response.raise_for_status()
     if len(response.content) > _MAX_ARTICLE_BYTES:
