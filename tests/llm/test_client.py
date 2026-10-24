@@ -67,17 +67,29 @@ def test_ollama_local_call_disables_thinking(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434/v1")
     monkeypatch.setattr("app.llm.client.request_options", lambda: {"num_ctx": 4096})
-    monkeypatch.setattr("app.llm.client.post_chat", _ok)
+    def native_reply(url, payload, timeout, headers=None, transport=None):
+        _ok.seen = {"url": url, "payload": payload, "headers": headers}
+        return {
+            "message": {"content": "готово"},
+            "done_reason": "stop",
+            "prompt_eval_count": 2,
+            "eval_count": 3,
+        }
 
-    complete(
+    monkeypatch.setattr("app.llm.client.post_chat", native_reply)
+
+    result = complete(
         [{"role": "user", "content": "Reply with exactly WORKS"}],
         model="gemma-4-26b-a4b",
         mode="local_only",
         max_tokens=50,
     )
 
+    assert result.text == "готово"
+    assert result.tokens == 5
     assert _ok.seen["payload"]["think"] is False
-    assert _ok.seen["url"] == "http://127.0.0.1:11434/v1/chat/completions"
+    assert _ok.seen["payload"]["options"]["num_ctx"] == 4096
+    assert _ok.seen["url"] == "http://127.0.0.1:11434/api/chat"
 
 
 def test_json_parser_accepts_a_single_object_inside_model_wrappers():
