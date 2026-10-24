@@ -238,7 +238,8 @@ def import_news_catalog(output: Path, *, max_age_days: int = 3) -> CatalogImport
                 known_items=known, persist_files=False,
             )
             new_items = [item for item in batch.items if item.status == "imported"]
-            store_imported_news(source.id, [item.model_dump() for item in new_items])
+            # Store duplicates too: the same article may now have a longer, better-extracted body.
+            store_imported_news(source.id, [item.model_dump() for item in batch.items])
             known.extend(new_items)
             results.append({
                 "source_id": source.id, "source": source.name, "status": batch.status,
