@@ -135,31 +135,13 @@ export function RealMode({
     if (!suggestionsResponse.ok) throw new Error("Не удалось загрузить предложения сайта");
     const payload = (await response.json()) as { profile: SavedProfile };
     setProfileOptions((await optionsResponse.json()) as ProfileOptions);
-    let suggestions = ((await suggestionsResponse.json()) as { suggestions: SiteSuggestion[] }).suggestions;
-    let savedProfile = payload.profile;
-    let filledLabels: string[] = [];
-    if (suggestions.length) {
-      const csrfToken = await refreshCsrf();
-      const appliedResponse = await fetch("/api/real/profile/suggestions/apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
-      });
-      const applied = (await appliedResponse.json().catch(() => null)) as {
-        profile?: SavedProfile; filled_fields?: string[]; suggestions?: SiteSuggestion[];
-      } | null;
-      if (appliedResponse.ok && applied?.profile) {
-        savedProfile = applied.profile;
-        suggestions = applied.suggestions ?? [];
-        filledLabels = (applied.filled_fields ?? []).map((field) => PROFILE_FIELD_LABELS[field] ?? field);
-      }
-    }
+    const suggestions = ((await suggestionsResponse.json()) as { suggestions: SiteSuggestion[] }).suggestions;
+    const savedProfile = payload.profile;
     setSiteSuggestions(suggestions);
     setProfile({ ...EMPTY_PROFILE, ...savedProfile });
     setProfileMeta(savedProfile);
-    setEditingProfile(filledLabels.length > 0 || savedProfile.status !== "complete");
-    if (filledLabels.length) {
-      setNotice(`В поля профиля записано: ${filledLabels.join(", ")}. Проверьте значения и поправьте, если нужно.`);
-    }
+    // Never approve AI-suggested information on page load.
+    setEditingProfile(suggestions.length > 0 || savedProfile.status !== "complete");
     setProfileDirty(false);
   }
 
@@ -378,16 +360,43 @@ export function RealMode({
         setProfileDirty(false);
         setEditingProfile(true);
       }
-      const labels = (payload.filled_fields ?? []).map((field) => PROFILE_FIELD_LABELS[field] ?? field);
-      const opened = payload.opened_url ? ` Сайт открылся как ${payload.opened_url}.` : "";
-      setNotice(labels.length
-        ? `В поля профиля записано: ${labels.join(", ")}. Проверьте значения и поправьте, если нужно.${opened}`
+      const count = (payload.suggestions ?? []).length;
+      const opened = payload.opened_url ? ` Сайт перенаправил на ${payload.opened_url}.` : "";
+      setNotice(count
+        ? `Изучено страниц: ${payload.pages_scanned ?? 0}. Найдено предложений: ${count}. Проверьте источники и подтвердите подходящие значения.${opened}`
         : payload.pages_scanned
-          ? `Просмотрено страниц: ${payload.pages_scanned}. Новых пустых полей для заполнения нет.${opened}`
-          : "На сайте не найдено доступных для анализа страниц.");
+          ? `Изучено страниц: ${payload.pages_scanned}. Новых подтверждаемых сведений для пустых полей не найдено.${opened}`
+          : "Не удалось найти страницы с доступным текстом.");
       setSiteConsent(false);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось проанализировать сайт");
+    } finally {
+      setSiteBusy(false);
+    }
+  }
+
+  async function acceptAllSiteSuggestions() {
+    if (profileDirty || !siteSuggestions.length) return;
+    setSiteBusy(true);
+    setError("");
+    try {
+      const csrfToken = await refreshCsrf();
+      const response = await fetch("/api/real/profile/suggestions/apply", {
+        method: "POST", headers: { "X-CSRF-Token": csrfToken },
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        profile?: SavedProfile; filled_fields?: string[]; suggestions?: SiteSuggestion[]; detail?: string;
+      } | null;
+      if (!response.ok || !payload?.profile) throw new Error(payload?.detail || "Не удалось заполнить профиль");
+      setProfile({ ...EMPTY_PROFILE, ...payload.profile });
+      setProfileMeta(payload.profile);
+      setSiteSuggestions(payload.suggestions ?? []);
+      const fields = (payload.filled_fields ?? []).map((field) => PROFILE_FIELD_LABELS[field] ?? field);
+      setNotice(fields.length
+        ? `Подтверждены и записаны: ${fields.join(", ")}. Проверьте результат перед продолжением.`
+        : "Свободных полей для применения предложений больше нет.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось подтвердить предложения");
     } finally {
       setSiteBusy(false);
     }
@@ -574,7 +583,9 @@ export function RealMode({
           {banners}
           <SuggestionsPanel
             suggestions={siteSuggestions} warnings={siteWarnings} busy={siteBusy} dirty={profileDirty}
-            label={suggestionLabel} fieldLabels={PROFILE_FIELD_LABELS} onDecide={(suggestion, accept) => void decideSuggestion(suggestion, accept)}
+            label={suggestionLabel} fieldLabels={PROFILE_FIELD_LABELS}
+            onDecide={(suggestion, accept) => void decideSuggestion(suggestion, accept)}
+            onAcceptAll={() => void acceptAllSiteSuggestions()}
           />
           <ProfileForm
             profile={profile} options={profileOptions} busy={profileBusy} dirty={profileDirty}
