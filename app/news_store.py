@@ -73,6 +73,17 @@ def prune_stored_news(*, retention_days: int, max_items: int) -> dict[str, int]:
     return {"removed_by_age": age_cursor.rowcount, "removed_by_count": len(excess), "remaining": remaining}
 
 
+def clear_stored_news() -> int:
+    """Remove all collected news records without touching profiles or other app data."""
+    if not app_db_path().is_file():
+        return 0
+    init_app_db()
+    with connect_app() as connection:
+        count = int(connection.execute("SELECT COUNT(*) FROM news_articles").fetchone()[0])
+        connection.execute("DELETE FROM news_articles")
+    return count
+
+
 def stored_news_count() -> int:
     if not app_db_path().is_file():
         return 0
