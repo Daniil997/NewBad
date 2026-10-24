@@ -637,11 +637,11 @@ def _strip_page_boilerplate(value: str) -> str:
     """Remove recurring CBR page controls and metadata that are not article content."""
     text = value
     patterns = (
-        r"(?i)\\bстраница была полезной\\s*\\?",
-        r"(?i)\\bответственное структурное подразделение\\s*:\\s*.*$",
-        r"(?i)\\bпоследнее обновление страницы\\s*:?\\s*.*$",
-        r"(?i)\\bверсия для печати\\b",
-        r"(?i)\\bподелиться\\b",
+        r"(?i)\bстраница была полезной\\s*\\?",
+        r"(?i)\bответственное структурное подразделение\\s*:\\s*.*$",
+        r"(?i)\bпоследнее обновление страницы\\s*:?\\s*.*$",
+        r"(?i)\bверсия для печати\\b",
+        r"(?i)\bподелиться\\b",
     )
     for pattern in patterns:
         text = re.sub(pattern, " ", text)
