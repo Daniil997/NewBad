@@ -80,6 +80,7 @@ export function Service({
   const [pasteTitle, setPasteTitle] = useState("");
   const [pasteText, setPasteText] = useState("");
   const [pasteBusy, setPasteBusy] = useState(false);
+  const [resettingData, setResettingData] = useState(false);
   const [pasteError, setPasteError] = useState("");
   const [profileError, setProfileError] = useState("");
   const [feedError, setFeedError] = useState("");
@@ -206,6 +207,31 @@ export function Service({
     setView("news");
     if (window.matchMedia("(max-width: 860px)").matches) {
       window.setTimeout(() => detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+    }
+  }
+
+  async function resetReceivedData() {
+    const confirmed = window.confirm(
+      "Сбросить историю и результаты тестового режима и заново загрузить тестовую карточку? Встроенные компании и исходные материалы останутся."
+    );
+    if (!confirmed) return;
+    setResettingData(true);
+    setFeedError("");
+    setCardError("");
+    try {
+      const response = await fetch("/api/settings/demo/reset", { method: "POST" });
+      const payload = await response.json().catch(() => null) as { detail?: string } | null;
+      if (!response.ok) throw new Error(payload?.detail || "Не удалось сбросить тестовые данные");
+      setMessages([]);
+      setFailedQuestion("");
+      setCard(null);
+      setCardPhase("loading");
+      setEventId("");
+      setAttempt((current) => current + 1);
+    } catch (reason) {
+      setCardError(reason instanceof Error ? reason.message : "Не удалось сбросить тестовые данные");
+    } finally {
+      setResettingData(false);
     }
   }
 
@@ -381,6 +407,9 @@ export function Service({
                 </select>
               </label>
             ) : null}
+            <button type="button" className="btn btn-secondary" onClick={() => void resetReceivedData()} disabled={resettingData}>
+              {resettingData ? "Сбрасываем…" : "Сбросить полученные данные"}
+            </button>
             <button type="button" className="btn btn-primary" onClick={() => setView("profile")} disabled={!profile}>
               Профиль компании
             </button>
