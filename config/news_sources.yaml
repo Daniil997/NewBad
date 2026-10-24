@@ -5,16 +5,19 @@ sources:
     url: https://www.cbr.ru/rss/RssPress
     timeout_s: 15
     min_interval_s: 30
+    article_mode: html
   - id: cbr_events
     name: Банк России — новости, интервью и выступления
     url: https://www.cbr.ru/rss/eventrss
     timeout_s: 15
     min_interval_s: 30
+    article_mode: html
   - id: cbr_news
     name: Банк России — новости сайта
     url: https://www.cbr.ru/rss/RssNews
     timeout_s: 15
     min_interval_s: 30
+    article_mode: html
   - id: cbr_currency
     name: Банк России — курсы валют
     url: https://www.cbr.ru/rss/RssCurrency
