@@ -640,6 +640,23 @@ dd {
   margin-bottom: 1rem;
 }
 
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.settings-actions button.secondary {
+  background: #fff;
+  color: #8b1e18;
+  border: 1px solid #d8aaa6;
+}
+
+.settings-actions button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
 .settings-form label {
   display: grid;
   gap: 0.3rem;
