@@ -180,7 +180,7 @@ def import_news(
     batch = NewsImport(
         source_id=origin.id,
         source=origin.name,
-        status=_batch_status(raw_items, accepted),
+        status=_batch_status(raw_items, accepted, rejected),
         loaded_at=loaded_at,
         items=accepted,
         rejected=rejected,
@@ -519,13 +519,17 @@ def _write(output: Path, batch: NewsImport) -> None:
     (output / f"import-{batch.source_id}.json").write_text(batch.model_dump_json(indent=2), encoding="utf-8")
 
 
-def _batch_status(raw_items: list, accepted: list[ImportedNews]) -> str:
+def _batch_status(
+    raw_items: list, accepted: list[ImportedNews], rejected: list[RejectedNews] | None = None,
+) -> str:
     if not raw_items:
         return "empty"
     if any(item.status == "imported" for item in accepted):
         return "imported"
     if accepted:
         return "duplicate"
+    if rejected and all(item.reason == "старше окна сбора" for item in rejected):
+        return "outside_window"
     return "rejected"
 
 
