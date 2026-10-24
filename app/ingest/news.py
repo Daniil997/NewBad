@@ -447,7 +447,11 @@ def _duplicate(item: ImportedNews, known: list[ImportedNews]) -> str | None:
         if earlier.status != "imported":
             continue
         if (_same_url(earlier.url, item.url) or earlier.id == item.id
-                or (earlier.published_at == item.published_at and _similar(earlier.title, item.title))):
+                or (
+                    earlier.published_at == item.published_at
+                    and _similar(earlier.title, item.title)
+                    and _SPACE.sub(" ", earlier.text).casefold() == _SPACE.sub(" ", item.text).casefold()
+                )):
             return earlier.id
     return None
 
