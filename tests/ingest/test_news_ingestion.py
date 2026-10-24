@@ -332,3 +332,33 @@ def test_stored_article_is_enriched_when_later_fetch_has_more_text(monkeypatch, 
     assert stored[0]["id"] == "cbr-article-1"
     assert stored[0]["text"] == long_text
     assert stored[0]["sha256"] == "b" * 64
+
+
+
+def test_listing_page_is_not_used_as_article_body(tmp_path):
+    # Some CBR RSS entries link to a section page listing many draft regulations,
+    # not to an individual publication. Keep the RSS summary instead of importing
+    # every link title and site footer as if it were the article.
+    links = "".join(
+        f'<li><a href="/project/{index}">Проект нормативного документа Банка России номер {index} '
+        + ("с подробным описанием требований к финансовым организациям " * 2)
+        + "</a></li>"
+        for index in range(12)
+    )
+    page = (
+        "<html><body><main><h1>Проекты нормативных актов Банка России</h1>"
+        "<h2>Публичное обсуждение</h2><ul>" + links + "</ul>"
+        "<p>Страница была полезной?</p><p>Последнее обновление страницы: 23.10.2026</p>"
+        "</main></body></html>"
+    )
+    source = _SOURCE.model_copy(update={"article_mode": "html"})
+    result = import_news(
+        tmp_path, source=source,
+        fetch=lambda: _feed(_item(text=_TEXT)),
+        fetch_article=lambda _url: page,
+        loaded_on=date(2026, 10, 21), min_interval_s=0,
+    )
+    assert result.status == "imported"
+    assert result.items[0].text == _TEXT
+    assert "Проект нормативного документа" not in result.items[0].text
+    assert "Последнее обновление страницы" not in result.items[0].text
