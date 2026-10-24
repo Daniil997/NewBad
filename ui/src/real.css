@@ -369,3 +369,12 @@
 .real .site-scan-result summary { cursor: pointer; font-weight: 600; }
 .real .site-scanned-pages { padding-left: 1.3rem; line-height: 1.55; }
 .real .site-scanned-pages li { margin: .3rem 0; }
+
+.real .site-provenance { background: #f8faf8; border: 1px solid #dbe9df; margin: .7rem 0; }
+.real .site-provenance summary { cursor: pointer; font-weight: 700; color: #275a41; }
+.real .site-provenance details > .hint { margin: .8rem 0; }
+.real .site-provenance-list { padding: 0; list-style: none; display: grid; gap: .65rem; }
+.real .site-provenance-list li { display: grid; gap: .25rem; padding: .8rem .9rem; background: #fff; border: 1px solid #e4e9e4; border-radius: 10px; }
+.real .site-provenance-list small { overflow-wrap: anywhere; }
+.real .site-provenance-list a { color: #b82c24; }
+.real .site-provenance-list blockquote { border-left: 3px solid #5c9e75; padding: .35rem .6rem; margin: .3rem 0 0; color: #4a584b; background: #f4f8f5; overflow-wrap: anywhere; }
