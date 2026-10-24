@@ -287,9 +287,11 @@ def analyze_profile_news(profile: dict, news: NewsItem) -> dict | None:
             "Не давай финансовых и юридических рекомендаций. "
             "Верни JSON строго с ключами: summary (что сообщается в публикации, 1–2 предложения); "
             "relevance (как это может относиться к компании, 2–3 предложения); "
-            "risks (минимум один конкретный возможный негативный эффект или уязвимость для этой компании и почему, 2–3 предложения); "
-            "opportunities (минимум одна конкретная возможность или полезный эффект и почему, 2–3 предложения); "
-            "questions (2–3 вопроса, которые владельцу стоит проверить), evidence_ids (только ID использованных материалов, "
+            "risks (конкретный возможный негативный эффект, при каком условии он возникнет, 2–3 предложения); "
+            "opportunities (возможный позитивный эффект и условие его появления, 2–3 предложения); "
+            "impact_channel (кратко назови канал воздействия: спрос, затраты, регулирование, логистика, валюта и др.); "
+            "next_step (одно конкретное действие по проверке гипотезы без финансовых или юридических указаний); "
+            "questions (2–3 проверяемых вопроса владельцу), evidence_ids (только ID использованных материалов, "
             "включи ID новости и ID профиля). Не добавляй числа, которых нет в материалах."
         ),
         {"evidence": evidence},
@@ -352,6 +354,16 @@ def _check_report(payload: dict, allowed: dict[str, dict], news_key: str, valida
             if isinstance(item, str) and item.strip() and (not validate_numbers or _grounded(item, corpus)):
                 questions.append(item.strip()[:300])
     result["questions"] = questions[:3]
+    # New optional fields: older model responses remain valid but the interface
+    # still gets an actionable step and a clearly identified impact channel.
+    channel = str(payload.get("impact_channel") or "").strip()
+    step = str(payload.get("next_step") or "").strip()
+    if validate_numbers and channel and not _grounded(channel, corpus):
+        channel = ""
+    if validate_numbers and step and not _grounded(step, corpus):
+        step = ""
+    result["impact_channel"] = channel[:160]
+    result["next_step"] = (step or "Уточните, какие договоры, затраты или клиенты реально связаны с этой темой.")[:450]
     result["evidence_ids"] = ids
     return result, ""
 
@@ -439,6 +451,9 @@ def _fallback_report(profile: dict, news: NewsItem, ids: list[str]) -> dict:
     return {
         "summary": summary[:900], "relevance": relevance[:900], "risks": risks[:900],
         "opportunities": opportunities[:900], "questions": questions, "evidence_ids": ids,
+        "impact_channel": channels[0] if channels else "возможные косвенные эффекты",
+        "next_step": ("Проверьте условия договоров и показатели по направлению «" + channels[0] + "»."
+                      if channels else "Уточните профиль клиентов, поставщиков и рынков, затем проверьте связь новости с ними."),
         "origin": "rules",
     }
 
