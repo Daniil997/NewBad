@@ -46,8 +46,12 @@ INDUSTRY_EVENT_MAP = {
     "manufacturing": {"commodities_energy", "metals", "regulation_tax"},
     "agriculture": {"commodities_energy", "sanctions_trade", "regulation_tax"},
     "construction": {"metals", "commodities_energy", "monetary_policy"},
-    "it_communications": {"regulation_tax", "technology_security"},
+    "it_communications": {"regulation_tax"},
     "real_estate": {"monetary_policy", "regulation_tax"},
+    "business_services": {"regulation_tax", "macro", "consumption_labor"},
+    "consumer_services": {"consumption_labor", "inflation_macro", "regulation_tax"},
+    "health_education": {"regulation_tax", "consumption_labor"},
+    "hospitality_tourism": {"consumption_labor", "fx", "sanctions_trade"},
 }
 GENERIC_PROFILE_TERMS = {
     "компания", "компании", "компанию", "компаниям", "товары", "услуги", "бизнес",
