@@ -2,12 +2,13 @@
 
 import hashlib
 import json
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
 from app.user_store import connect_app, init_app_db, now_utc
 
-BASE_SCORING_VERSION = "real-llm-v2"
+BASE_SCORING_VERSION = "real-llm-v3"
 
 
 def scoring_version() -> str:
@@ -55,41 +56,131 @@ def article_hash(item) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+# Single relevance scale shared by the rules, model arbitration and the frontend:
+# 0–0.29: no substantiated link; 0.30–0.54: weak; 0.55–0.79: link; 0.80–1: strong.
+WEAK_LINK = 0.30
+CLEAR_LINK = 0.55
+STRONG_LINK = 0.80
+
+INTEREST_LABELS = {
+    "credit_interest": "интерес к кредитам и стоимости финансирования",
+    "deposit_interest": "интерес к депозитам и ликвидности",
+    "currency_interest": "интерес к валютным операциям",
+    "export_import_interest": "интерес к внешней торговле",
+}
+
+
+def _has_phrase(haystack: str, phrase: str) -> bool:
+    words = re.findall(r"[a-zа-яё0-9]+", phrase.casefold())
+    if not words:
+        return False
+    pattern = r"(?<!\w)" + r"\W+".join(re.escape(word) for word in words) + r"(?!\w)"
+    return bool(re.search(pattern, haystack))
+
+
+def _specific_terms(value: str) -> list[str]:
+    return [
+        word for word in re.findall(r"[a-zа-яё0-9-]+", value.casefold())
+        if len(word) >= 6 and word not in GENERIC_PROFILE_TERMS
+        and word not in {"россии", "новости", "компаний", "продукции", "предприятия", "экономика"}
+    ]
+
+
 def evaluate(profile: dict, item) -> dict:
+    """Deterministic, evidence-led relevance. One incidental word cannot yield a strong link."""
     event = item.event_type or "unknown"
-    signals: list[tuple[float, str]] = []
+    text = f"{item.title} {item.excerpt}".casefold().replace("ё", "е")
+    signals: list[tuple[str, float, str]] = []
+
+    def add(key: str, weight: float, reason: str) -> None:
+        if not any(signal[0] == key for signal in signals):
+            signals.append((key, weight, reason))
+
+    company = str(profile.get("company_name") or "").strip()
+    if len(company) >= 7 and _has_phrase(text, company.replace("ё", "е")):
+        add("company", 0.95, "Компания прямо названа в публикации")
+
     for topic in profile.get("focus_topics", []):
         if event in TOPIC_EVENT_MAP.get(topic, set()):
-            signals.append((0.85, f"Тема профиля: {topic}"))
-    for field, value in INTEREST_EVENT_MAP.items():
-        if profile.get(field) == "interested" and event in value:
-            label = {"credit_interest": "интерес к кредитованию и ставкам", "deposit_interest": "интерес к депозитам и ликвидности", "currency_interest": "интерес к валютным операциям", "export_import_interest": "интерес к экспорту и импорту"}[field]
-            signals.append((0.75, f"Профиль отмечает {label}"))
+            add("focus", 0.68, f"Отслеживаемая тема профиля: {topic}")
+            break
+    for field, topics in INTEREST_EVENT_MAP.items():
+        if profile.get(field) == "interested" and event in topics:
+            add("bank_need", 0.64, f"Указан {INTEREST_LABELS[field]}")
+            break
     for tag in profile.get("industry_tags", []):
         if event in INDUSTRY_EVENT_MAP.get(tag, set()):
-            signals.append((0.62, f"Отраслевая связь: {tag}"))
-    if event not in {"", "unknown", None}:
-        signals.append((0.38, f"Категория новости: {event}"))
-    haystack = f"{item.title} {item.excerpt}".casefold()
-    direct_name = str(profile.get("company_name") or "").strip()
-    if len(direct_name) >= 4 and direct_name.casefold() in haystack:
-        signals.append((1.0, "В новости прямо упоминается компания"))
-    geography = [str(value).strip() for value in profile.get("market_geographies", [])]
-    matched_geography = [value for value in geography if len(value) >= 4 and value.casefold() in haystack]
-    if matched_geography:
-        signals.append((0.84, f"Упомянута география бизнеса: {', '.join(matched_geography[:3])}"))
-    profile_text = [profile.get(key, "") for key in ("industry", "products_services", "dependencies", "external_factors", "context_note")]
-    matched_terms = sorted({term.strip(" .,;:()") for part in profile_text for term in str(part).split() if len(term.strip(" .,;:()")) >= 5 and term.strip(" .,;:()").casefold() not in GENERIC_PROFILE_TERMS and term.strip(" .,;:()").casefold() in haystack})
-    if matched_terms:
-        signals.append((0.9, f"Совпадение с описанием компании: {', '.join(matched_terms[:4])}"))
-    signals.sort(key=lambda pair: pair[0], reverse=True)
-    score = round(min(1.0, signals[0][0] if signals else 0.0), 3)
-    # Any signal is explainable and relevant; unknown event categories need a stronger textual/profile match.
-    relevant = any(weight >= 0.62 for weight, _ in signals)
-    reasons = [reason for _, reason in signals[:3]]
+            add("industry", 0.52, f"Возможна отраслевая связь: {tag}")
+            break
+
+    regions = [
+        str(value).strip() for value in [
+            profile.get("country"), profile.get("region"), profile.get("city"),
+            *(profile.get("market_geographies") or []),
+        ]
+        if value and len(str(value).strip()) >= 5
+    ]
+    matches = [value for value in regions if _has_phrase(text, value.replace("ё", "е"))]
+    if matches:
+        add("geography", 0.38, f"В публикации упомянут рынок или регион компании: {', '.join(matches[:2])}")
+
+    # Require two different specific words, not one incidental substring.
+    profile_terms = {
+        word for field in ("industry", "products_services", "dependencies", "external_factors", "context_note")
+        for word in _specific_terms(str(profile.get(field) or "").replace("ё", "е"))
+    }
+    matches = sorted(term for term in profile_terms if _has_phrase(text, term))
+    if len(matches) >= 2:
+        add("business", 0.72, f"Совпадают признаки деятельности: {', '.join(matches[:3])}")
+    if event not in ("", "unknown"):
+        add("category", 0.12, "Определена категория публикации; сама по себе она не доказывает связь")
+
+    signals.sort(key=lambda signal: signal[1], reverse=True)
+    substantial = [signal for signal in signals if signal[0] != "category"]
+    if substantial:
+        score = substantial[0][1]
+        # Independent signals reinforce a link; repeated tags in one category do not.
+        score += 0.13 if len(substantial) > 1 else 0
+        score += 0.07 if len(substantial) > 2 else 0
+        score = round(min(0.98, score), 3)
+    else:
+        score = 0.12 if signals else 0.0
+    reasons = [signal[2] for signal in substantial[:3]]
     if not reasons:
-        reasons = ["Не найдено подтверждённой связи с заполненными полями профиля"]
-    return {"relevant": relevant, "score": score, "reasons": reasons, "method": "Правила (real-rules-v1)"}
+        reasons = ["Связь с заполненными признаками профиля пока не подтверждена"]
+    return {
+        "relevant": score >= WEAK_LINK,
+        "score": score,
+        "reasons": reasons,
+        "method": "Проверяемые признаки профиля (real-rules-v3)",
+    }
+
+
+def calibrate_model_result(profile: dict, item, model: dict | None) -> dict:
+    """Use LLM only as a bounded supporting judgement, not as unverified certainty."""
+    baseline = evaluate(profile, item)
+    if model is None:
+        return baseline
+    try:
+        score = float(model["score"])
+    except (KeyError, ValueError, TypeError):
+        return baseline
+    if not 0 <= score <= 1:
+        return baseline
+    if baseline["score"] < WEAK_LINK:
+        # A model cannot promote an unsupported category match to a factual link.
+        return baseline
+    final_score = round(0.75 * baseline["score"] + 0.25 * score, 3)
+    explanation = str((model.get("reasons") or [""])[0]).strip()
+    reasons = list(baseline["reasons"])
+    if explanation and explanation not in reasons:
+        reasons.append(f"Оценка модели: {explanation[:350]}")
+    return {
+        "relevant": final_score >= WEAK_LINK,
+        "score": final_score,
+        "reasons": reasons[:4],
+        "method": "Правила + оценка модели",
+    }
 
 
 def enqueue_job(profile_id: str, profile_version: int, candidates: list[str]) -> str | None:
@@ -177,7 +268,7 @@ def save_job_results(job: dict, profile: dict, items_by_id: dict, model_results:
             item = items_by_id.get(news_id)
             if item is None:
                 continue
-            result = (model_results or {}).get(news_id) or evaluate(profile, item)
+            result = calibrate_model_result(profile, item, (model_results or {}).get(news_id))
             connection.execute(
                 """INSERT OR IGNORE INTO profile_news_analysis
                 (profile_id, profile_version, news_id, news_hash, scoring_version, relevant, score, reasons_json, created_at)
