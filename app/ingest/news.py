@@ -567,7 +567,7 @@ class _ArticleTextParser(HTMLParser):
             self.anchor_depth += 1
             self.anchor_count += 1
         if not skipped and tag in self._BLOCK:
-            self._append("\\n")
+            self._append("\n")
 
     def handle_endtag(self, tag: str) -> None:
         match = next((i for i in range(len(self.stack) - 1, -1, -1) if self.stack[i][0] == tag), None)
@@ -581,7 +581,7 @@ class _ArticleTextParser(HTMLParser):
             if candidate_id is not None and candidate_id in self.active:
                 self.active.remove(candidate_id)
         if tag in self._BLOCK:
-            self._append("\\n")
+            self._append("\n")
 
     def handle_data(self, data: str) -> None:
         if self.stack and self.stack[-1][1]:
@@ -602,8 +602,9 @@ class _ArticleTextParser(HTMLParser):
                 self.candidates[candidate_id][1].append(value)
 
     def text(self) -> str:
-        body = _strip_page_boilerplate(_SPACE.sub(" ", " ".join(self.body)).strip())
-        folded = body.casefold()
+        raw_body = _SPACE.sub(" ", " ".join(self.body)).strip()
+        body = _strip_page_boilerplate(raw_body)
+        folded = raw_body.casefold()
         # CBR RSS sometimes links to a section/index page rather than an individual
         # publication. Such pages contain many linked document titles and page chrome;
         # importing the whole listing as the article body pollutes search and AI analysis.
@@ -617,42 +618,52 @@ class _ArticleTextParser(HTMLParser):
             and len(body) >= 700
             and self.anchor_chars / max(len(body), 1) >= 0.35
         )
-        if page_chrome or link_heavy_listing:
+        if link_heavy_listing:
             return ""
         eligible = [
             (score, _strip_page_boilerplate(_SPACE.sub(" ", " ".join(parts)).strip()))
             for score, parts in self.candidates
         ]
         eligible = [(score, text) for score, text in eligible if len(text) >= _MIN_ARTICLE_TEXT]
-        if eligible:
-            for _score, candidate_text in sorted(
-                eligible, key=lambda pair: (pair[0], min(len(pair[1]), _MAX_ARTICLE_TEXT)), reverse=True
-            ):
-                if len(candidate_text) >= len(body) * 0.25:
-                    return candidate_text
+        for score, candidate_text in sorted(
+            eligible, key=lambda pair: (pair[0], min(len(pair[1]), _MAX_ARTICLE_TEXT)), reverse=True
+        ):
+            # A focused article container is trustworthy even when the site's
+            # global footer includes page-feedback controls.
+            if score >= 90 and len(candidate_text) >= len(body) * 0.25:
+                return candidate_text
+        if page_chrome:
+            # A section/index page without a focused article is not a news story.
+            return ""
+        for _score, candidate_text in sorted(
+            eligible, key=lambda pair: (pair[0], min(len(pair[1]), _MAX_ARTICLE_TEXT)), reverse=True
+        ):
+            if len(candidate_text) >= len(body) * 0.25:
+                return candidate_text
         return body
 
 
 def _strip_page_boilerplate(value: str) -> str:
     """Remove recurring CBR page controls and metadata that are not article content."""
-    text = value
+    # Some RSS fields contain literal "\n" sequences rather than line breaks.
+    text = re.sub(r"\\[nrt]", " ", value)
     patterns = (
-        r"(?i)\bстраница была полезной\\s*\\?",
-        r"(?i)\bответственное структурное подразделение\\s*:\\s*.*$",
-        r"(?i)\bпоследнее обновление страницы\\s*:?\\s*.*$",
-        r"(?i)\bверсия для печати\\b",
-        r"(?i)\bподелиться\\b",
+        r"(?i)\bстраница была полезной\s*\?",
+        r"(?i)\bответственное структурное подразделение\s*:\s*.*$",
+        r"(?i)\bпоследнее обновление страницы\s*:?\s*.*$",
+        r"(?i)\bверсия для печати\b",
+        r"(?i)\bподелиться\b",
     )
     for pattern in patterns:
         text = re.sub(pattern, " ", text)
-    return _SPACE.sub(" ", text).strip(" \\t\\r\\n|·—-:")
+    return _SPACE.sub(" ", text).strip(" \t\r\n|·—-:")
 
 
 def _html_to_text(value: str) -> str:
     if not value:
         return ""
     if "<" not in value:
-        return _SPACE.sub(" ", html.unescape(value)).strip()
+        return _strip_page_boilerplate(html.unescape(value))
     parser = _ArticleTextParser()
     parser.feed(html.unescape(value))
     parser.close()
