@@ -78,6 +78,8 @@ class NewsImport(BaseModel):
     loaded_at: str
     items: list[ImportedNews]
     rejected: list[RejectedNews]
+    seen: int = 0
+    article_fetches: int = 0
 
 
 class CatalogImport(BaseModel):
@@ -182,6 +184,8 @@ def import_news(
         loaded_at=loaded_at,
         items=accepted,
         rejected=rejected,
+        seen=len(raw_items),
+        article_fetches=article_fetches,
     )
     if persist_files:
         _write(output, batch)
@@ -279,24 +283,34 @@ def import_news_catalog(output: Path, *, max_age_days: int = 3) -> CatalogImport
             # Store duplicates too: the same article may now have a longer, better-extracted body.
             store_imported_news(source.id, [item.model_dump() for item in batch.items])
             known.extend(new_items)
+            rejected_content = [
+                row for row in batch.rejected
+                if row.reason not in {"старше окна сбора", "дата публикации в будущем"}
+            ]
+            skipped_old = sum(row.reason == "старше окна сбора" for row in batch.rejected)
+            skipped_future = sum(row.reason == "дата публикации в будущем" for row in batch.rejected)
             rejection_reasons: dict[str, int] = {}
-            for rejected_item in batch.rejected:
+            for rejected_item in rejected_content:
                 rejection_reasons[rejected_item.reason] = rejection_reasons.get(rejected_item.reason, 0) + 1
             rejected_examples = [
                 {"title": item.title or "", "url": item.url or "", "reason": item.reason}
-                for item in batch.rejected[:5]
+                for item in rejected_content[:5]
             ]
             results.append({
                 "source_id": source.id, "source": source.name, "status": batch.status,
+                "seen": batch.seen, "article_fetches": batch.article_fetches,
                 "imported": sum(item.status == "imported" for item in batch.items),
                 "duplicates": sum(item.status == "duplicate" for item in batch.items),
-                "rejected": len(batch.rejected), "rejection_reasons": rejection_reasons,
+                "rejected": len(rejected_content), "skipped_old": skipped_old,
+                "skipped_future": skipped_future, "rejection_reasons": rejection_reasons,
                 "rejected_examples": rejected_examples, "error": "",
             })
         except NewsIngestError as error:
             results.append({
                 "source_id": source.id, "source": source.name, "status": "error",
-                "imported": 0, "duplicates": 0, "rejected": 0, "error": error.kind,
+                "imported": 0, "duplicates": 0, "rejected": 0,
+                "seen": 0, "article_fetches": 0, "skipped_old": 0, "skipped_future": 0,
+                "error": error.kind,
             })
     statuses = [item["status"] for item in results]
     status = "error" if statuses and all(item == "error" for item in statuses) else "partial" if "error" in statuses else "complete"
