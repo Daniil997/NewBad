@@ -313,3 +313,22 @@ def test_full_article_html_is_preferred_and_navigation_is_removed(tmp_path):
     assert "Главная Меню Контакты" not in result.items[0].text
     assert "Подписаться на рассылку" not in result.items[0].text
     assert "финансового рынка" in result.items[0].text
+
+
+def test_stored_article_is_enriched_when_later_fetch_has_more_text(monkeypatch, tmp_path):
+    from app.news_store import imported_news, store_imported_news
+
+    monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "app.sqlite3"))
+    base = {
+        "id": "cbr-article-1", "source": "Банк России", "url": "https://www.cbr.ru/press/event/?id=enrich",
+        "title": _TITLE, "published_at": "2026-10-21", "loaded_at": "2026-10-21",
+        "sha256": "a" * 64, "status": "imported",
+    }
+    store_imported_news("cbr_press", [{**base, "text": _TEXT}])
+    long_text = " ".join(["Полный текст публикации содержит важные подробности и условия принятого решения."] * 10)
+    store_imported_news("cbr_press", [{**base, "id": "new-guid-id", "text": long_text, "sha256": "b" * 64}])
+    stored = imported_news()
+    assert len(stored) == 1
+    assert stored[0]["id"] == "cbr-article-1"
+    assert stored[0]["text"] == long_text
+    assert stored[0]["sha256"] == "b" * 64
