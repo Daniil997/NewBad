@@ -3,6 +3,9 @@
 from datetime import date
 from html import escape
 
+import httpx
+import pytest
+
 from app.ingest import news as ingest
 from app.ingest.news import NewsSource, import_news
 
@@ -112,3 +115,44 @@ def test_similar_titles_on_same_day_preserve_distinct_articles(tmp_path):
         fetch=lambda: feed(first, second), loaded_on=date(2026, 10, 24), min_interval_s=0,
     )
     assert len([row for row in result.items if row.status == "imported"]) == 2
+
+
+def test_escaped_markup_is_cleaned_after_entity_decoding():
+    text = ingest._html_to_text("&lt;p&gt;Важный текст официального документа.&lt;/p&gt;")
+    assert text == "Важный текст официального документа."
+    assert "<p>" not in text
+
+
+def test_redirects_are_allowed_only_within_original_official_https_host(monkeypatch):
+    seen: list[str] = []
+
+    def fake_get(url: str, **_kwargs):
+        seen.append(url)
+        if url == "https://www.cbr.ru/rss/RssPress":
+            return httpx.Response(
+                301, headers={"location": "https://cbr.ru/rss/RssPress"},
+                request=httpx.Request("GET", url),
+            )
+        return httpx.Response(
+            200, text="<rss><channel></channel></rss>", request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(ingest.httpx, "get", fake_get)
+    assert "<rss>" in ingest._fetch_rss("https://www.cbr.ru/rss/RssPress", 5)
+    assert seen == ["https://www.cbr.ru/rss/RssPress", "https://cbr.ru/rss/RssPress"]
+
+
+def test_redirect_to_foreign_host_is_blocked_before_request(monkeypatch):
+    seen: list[str] = []
+
+    def fake_get(url: str, **_kwargs):
+        seen.append(url)
+        return httpx.Response(
+            302, headers={"location": "https://example.org/other"},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(ingest.httpx, "get", fake_get)
+    with pytest.raises(ingest.NewsIngestError, match="перенаправление"):
+        ingest._fetch_rss("https://www.cbr.ru/rss/RssPress", 5)
+    assert seen == ["https://www.cbr.ru/rss/RssPress"]
