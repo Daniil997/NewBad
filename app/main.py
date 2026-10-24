@@ -329,7 +329,7 @@ class SettingsView(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    news_lookback_days: int = Field(default=3, ge=1, le=30)
+    news_lookback_days: int = Field(default=14, ge=1, le=30)
     news_retention_days: int = Field(default=90, ge=1, le=3650)
     news_max_items: int = Field(default=500, ge=10, le=10000)
     news_collection_interval_hours: int = Field(default=0, ge=0, le=168)
