@@ -67,3 +67,12 @@ def test_model_complements_explainable_baseline_without_replacing_it():
     assert CLEAR_LINK <= result["score"] < STRONG_LINK
     assert any("Оценка модели" in reason for reason in result["reasons"])
     assert "Правила" in result["method"]
+
+
+def test_country_russia_alone_is_not_a_business_specific_geography_signal():
+    result = evaluate(
+        {"country": "Россия"},
+        article("Россия: опубликован обзор ключевой ставки"),
+    )
+    assert not result["relevant"]
+    assert result["score"] < WEAK_LINK
