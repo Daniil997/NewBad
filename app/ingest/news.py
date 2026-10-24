@@ -464,6 +464,12 @@ def _published(value: str) -> str | None:
             return date.fromisoformat(raw).isoformat()
         except ValueError:
             return None
+    # RSS extensions may publish W3C/ISO timestamps rather than RFC-2822 pubDate.
+    if "T" in raw:
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).date().isoformat()
+        except ValueError:
+            pass
     try:
         moment = parsedate_to_datetime(raw)
     except (TypeError, ValueError, IndexError, OverflowError):
