@@ -39,6 +39,8 @@ export function RealMode({
   const [siteConsent, setSiteConsent] = useState(false);
   const [siteBusy, setSiteBusy] = useState(false);
   const [siteWarnings, setSiteWarnings] = useState<string[]>([]);
+  const [siteScanPages, setSiteScanPages] = useState<{ url: string; title: string }[]>([]);
+  const [siteScanned, setSiteScanned] = useState(false);
   const [siteSuggestions, setSiteSuggestions] = useState<SiteSuggestion[]>([]);
   const [realFeed, setRealFeed] = useState<RealFeed | null>(null);
   const [realMarkets, setRealMarkets] = useState<RealMarkets | null>(null);
@@ -340,6 +342,8 @@ export function RealMode({
     setError("");
     setNotice("");
     setSiteWarnings([]);
+    setSiteScanPages([]);
+    setSiteScanned(false);
     try {
       const csrfToken = await refreshCsrf();
       const response = await fetch("/api/real/profile/site-analysis", {
@@ -349,11 +353,14 @@ export function RealMode({
       });
       const payload = (await response.json().catch(() => null)) as {
         status?: string; profile?: SavedProfile | null; filled_fields?: string[]; suggestions?: SiteSuggestion[];
-        warnings?: string[]; pages_scanned?: number; opened_url?: string; detail?: string;
+        warnings?: string[]; pages_scanned?: number; pages?: { title: string; url: string }[];
+        opened_url?: string; detail?: string;
       } | null;
       if (!response.ok || !payload) throw new Error(payload?.detail || "Не удалось проанализировать сайт");
       setSiteSuggestions(payload.suggestions ?? []);
       setSiteWarnings(payload.warnings ?? []);
+      setSiteScanPages(payload.pages ?? []);
+      setSiteScanned(true);
       if (payload.profile) {
         setProfile({ ...EMPTY_PROFILE, ...payload.profile });
         setProfileMeta(payload.profile);
@@ -581,6 +588,30 @@ export function RealMode({
             </div>
           </div>
           {banners}
+          {siteScanned ? (
+            <section className="card site-scan-result" aria-live="polite">
+              <div className="site-scan-result-heading">
+                <div>
+                  <p className="eyebrow">Аудит сайта</p>
+                  <h2>Изучено страниц: {siteScanPages.length}</h2>
+                  <p className="hint small">Модель получает текст только этих публичных страниц. Совпадения сохраняются как предложения для проверки.</p>
+                </div>
+                <span className="chip chip-mid">Предложений: {siteSuggestions.length}</span>
+              </div>
+              {siteScanPages.length > 0 ? (
+                <details>
+                  <summary>Какие страницы использованы</summary>
+                  <ul className="site-scanned-pages">
+                    {siteScanPages.map((page) => (
+                      <li key={page.url}>
+                        <a href={page.url} target="_blank" rel="noreferrer">{page.title || page.url}</a>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : <p className="hint">Проверьте адрес сайта, доступность страниц и ограничения robots.txt.</p>}
+            </section>
+          ) : null}
           <SuggestionsPanel
             suggestions={siteSuggestions} warnings={siteWarnings} busy={siteBusy} dirty={profileDirty}
             label={suggestionLabel} fieldLabels={PROFILE_FIELD_LABELS}
