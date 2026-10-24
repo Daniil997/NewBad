@@ -6,7 +6,7 @@ import yaml
 from app.db import ROOT
 from app.profile.build import load_profiles
 from app.profile.case_data import appendix_paths, case_profile, clear_case_cache
-from app.profile.sources import COMPANY_COLUMNS, SourceError, using_case_extract
+from app.profile.sources import COMPANY_COLUMNS, SourceError, case_dir, using_case_extract
 
 SEGMENT_RUB = 15_000_000_000
 
@@ -14,7 +14,7 @@ SEGMENT_RUB = 15_000_000_000
 @pytest.fixture
 def case_extract(monkeypatch):
     monkeypatch.setenv("PROFILE_SOURCE", "case")
-    if not using_case_extract():
+    if not using_case_extract() or case_dir() is None:
         pytest.skip("Рядом нет папки DATA с CSV выгрузки")
 
 
