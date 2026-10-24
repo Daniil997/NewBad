@@ -28,7 +28,7 @@ _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _EXCERPT = 600
 _MAX_ARTICLE_TEXT = 20000
 _MAX_ARTICLE_BYTES = 2 * 1024 * 1024
-_MAX_ARTICLE_FETCHES = 30
+_MAX_ARTICLE_FETCHES = 60
 _MIN_TEXT = 40
 _MIN_ARTICLE_TEXT = 200
 _SIMILAR = 0.8
@@ -119,21 +119,55 @@ def import_news(
     accepted: list[ImportedNews] = []
     rejected: list[RejectedNews] = []
     article_fetches = 0
-    for raw in raw_items:
+    current_day = loaded_on or date.today()
+    # Some feeds list hundreds of old messages before the newest. Reserve full
+    # article requests for valid, recent entries instead of spending the whole
+    # budget on stale RSS links.
+    by_recent_date = sorted(
+        raw_items,
+        key=lambda raw: _published(
+            _child_local(raw, "pubDate") or _child_local(raw, "published")
+            or _child_local(raw, "updated") or _child_local(raw, "date")
+        ) or "",
+        reverse=True,
+    )
+    for raw in by_recent_date:
+        published = _published(
+            _child_local(raw, "pubDate") or _child_local(raw, "published")
+            or _child_local(raw, "updated") or _child_local(raw, "date")
+        )
+        item_url = _item_url(raw)
+        if published is not None and max_age_days is not None:
+            delta = (current_day - date.fromisoformat(published)).days
+            if delta > max_age_days:
+                rejected.append(RejectedNews(
+                    url=item_url, title=_plain(_child_local(raw, "title")), reason="старше окна сбора",
+                ))
+                continue
+            if delta < -1:
+                rejected.append(RejectedNews(
+                    url=item_url, title=_plain(_child_local(raw, "title")), reason="дата публикации в будущем",
+                ))
+                continue
         article_fetcher = None
         if (
             origin.article_mode == "html"
             and article_fetches < _MAX_ARTICLE_FETCHES
-            and _url(_child_local(raw, "link")) is not None
+            and item_url is not None
+            and published is not None
         ):
-            article_fetcher = fetch_article or (lambda url: _fetch_article(url, origin, origin.timeout_s))
-            article_fetches += 1
+            # Long content:encoded bodies are already full enough; do not waste
+            # network calls on them unless an explicit fetcher was supplied.
+            rss_body = _html_to_text(
+                _child_local(raw, "encoded") or _child_local(raw, "content")
+                or _child_local(raw, "description") or _child_local(raw, "summary")
+            )
+            if fetch_article is not None or len(rss_body) < 1600:
+                article_fetcher = fetch_article or (lambda url: _fetch_article(url, origin, origin.timeout_s))
+                article_fetches += 1
         item, reason = _normalize(raw, origin, loaded_at, fetch_article=article_fetcher)
         if item is None and reason is not None:
             rejected.append(reason)
-            continue
-        if max_age_days is not None and (loaded_on or date.today()) - date.fromisoformat(item.published_at) > timedelta(days=max_age_days):
-            rejected.append(RejectedNews(url=item.url, title=item.title, reason="старше окна сбора"))
             continue
         earlier = _duplicate(item, [*known, *accepted])
         if earlier is not None:
@@ -349,10 +383,13 @@ def _fetch_rss(url: str, timeout_s: float) -> str:
 
 def _items(payload: str) -> list[ElementTree.Element]:
     root = ElementTree.fromstring(payload.lstrip("\ufeff"))
-    channel = root.find("channel")
+    local_name = lambda node: node.tag.rsplit("}", 1)[-1].casefold()
+    if local_name(root) == "feed":
+        return [node for node in root if local_name(node) == "entry"]
+    channel = next((node for node in root if local_name(node) == "channel"), None)
     if channel is None:
         raise NewsIngestError("source", "В ленте нет канала")
-    return list(channel.findall("item"))
+    return [node for node in channel if local_name(node) == "item"]
 
 
 def _normalize(
@@ -363,11 +400,15 @@ def _normalize(
     fetch_article: Callable[[str], str | None] | None = None,
 ) -> tuple[ImportedNews | None, RejectedNews | None]:
     title = _plain(_child_local(raw, "title"))
-    url = _url(_child_local(raw, "link"))
-    published = _published(_child_local(raw, "pubDate") or _child_local(raw, "date"))
+    url = _item_url(raw)
+    published = _published(
+        _child_local(raw, "pubDate") or _child_local(raw, "published")
+        or _child_local(raw, "updated") or _child_local(raw, "date")
+    )
     # RSS 2.0 часто содержит только короткий description; content:encoded может содержать полный текст.
     rss_text = _html_to_text(
-        _child_local(raw, "encoded") or _child_local(raw, "content") or _child_local(raw, "description")
+        _child_local(raw, "encoded") or _child_local(raw, "content")
+        or _child_local(raw, "description") or _child_local(raw, "summary")
     )
     text = rss_text
     if url and fetch_article:
@@ -387,7 +428,7 @@ def _normalize(
     if len(text) < _MIN_TEXT:
         return None, RejectedNews(url=url, title=title, reason="текст новости отсутствует или слишком короткий")
     # Заголовок больше не подменяет содержание: это создавало фиктивные «новости» без фактов.
-    identifier = _identifier(_child_local(raw, "guid"), url, source.id)
+    identifier = _identifier(_child_local(raw, "guid") or _child_local(raw, "id"), url, source.id)
     item = ImportedNews(
         id=identifier,
         url=url,
@@ -405,7 +446,8 @@ def _duplicate(item: ImportedNews, known: list[ImportedNews]) -> str | None:
     for earlier in known:
         if earlier.status != "imported":
             continue
-        if _same_url(earlier.url, item.url) or earlier.id == item.id or _similar(earlier.title, item.title):
+        if (_same_url(earlier.url, item.url) or earlier.id == item.id
+                or (earlier.published_at == item.published_at and _similar(earlier.title, item.title))):
             return earlier.id
     return None
 
@@ -515,6 +557,19 @@ def _similar(left: str, right: str) -> bool:
         return False
     union = first | second
     return bool(union) and len(first & second) / len(union) >= _SIMILAR
+
+
+def _item_url(raw: ElementTree.Element) -> str | None:
+    """RSS text link or Atom's <link href=...>; never invent a source address."""
+    value = _child_local(raw, "link")
+    if value:
+        return _url(value)
+    for node in raw:
+        if node.tag.rsplit("}", 1)[-1].casefold() == "link":
+            href = node.attrib.get("href", "")
+            if href and node.attrib.get("rel", "alternate") == "alternate":
+                return _url(href)
+    return None
 
 
 def _child(raw: ElementTree.Element, name: str) -> str:
@@ -630,7 +685,7 @@ class _ArticleTextParser(HTMLParser):
         ):
             # A focused article container is trustworthy even when the site's
             # global footer includes page-feedback controls.
-            if score >= 90 and len(candidate_text) >= len(body) * 0.25:
+            if score >= 90 and len(candidate_text) >= _MIN_ARTICLE_TEXT:
                 return candidate_text
         if page_chrome:
             # A section/index page without a focused article is not a news story.
