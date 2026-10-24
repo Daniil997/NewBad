@@ -3,6 +3,7 @@
 import hashlib
 import html
 import logging
+from html.parser import HTMLParser
 import re
 import time
 from collections.abc import Callable
@@ -25,7 +26,11 @@ _TAG = re.compile(r"(?is)<(script|style).*?>.*?</\1>|<[^>]+>")
 _SPACE = re.compile(r"\s+")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _EXCERPT = 600
+_MAX_ARTICLE_TEXT = 20000
+_MAX_ARTICLE_BYTES = 2 * 1024 * 1024
+_MAX_ARTICLE_FETCHES = 8
 _MIN_TEXT = 40
+_MIN_ARTICLE_TEXT = 200
 _SIMILAR = 0.8
 _fetched_at: dict[str, float] = {}
 
@@ -44,6 +49,7 @@ class NewsSource(BaseModel):
     url: str
     timeout_s: float = 15
     min_interval_s: float = 30
+    article_mode: str = "rss_only"
 
 
 class ImportedNews(BaseModel):
@@ -86,6 +92,7 @@ def import_news(
     *,
     source: NewsSource | None = None,
     fetch: Callable[[], str] | None = None,
+    fetch_article: Callable[[str], str | None] | None = None,
     loaded_on: date | None = None,
     min_interval_s: float | None = None,
     max_age_days: int | None = None,
@@ -111,8 +118,13 @@ def import_news(
     known = [*_known(output), *(known_items or [])] if persist_files else list(known_items or [])
     accepted: list[ImportedNews] = []
     rejected: list[RejectedNews] = []
+    article_fetches = 0
     for raw in raw_items:
-        item, reason = _normalize(raw, origin, loaded_at)
+        article_fetcher = None
+        if origin.article_mode == "html" and article_fetches < _MAX_ARTICLE_FETCHES:
+            article_fetcher = fetch_article or (lambda url: _fetch_article(url, origin, origin.timeout_s))
+            article_fetches += 1
+        item, reason = _normalize(raw, origin, loaded_at, fetch_article=article_fetcher)
         if item is None and reason is not None:
             rejected.append(reason)
             continue
@@ -226,7 +238,8 @@ def import_news_catalog(output: Path, *, max_age_days: int = 3) -> CatalogImport
                 known_items=known, persist_files=False,
             )
             new_items = [item for item in batch.items if item.status == "imported"]
-            store_imported_news(source.id, [item.model_dump() for item in new_items])
+            # Store duplicates too: the same article may now have a longer, better-extracted body.
+            store_imported_news(source.id, [item.model_dump() for item in batch.items])
             known.extend(new_items)
             results.append({
                 "source_id": source.id, "source": source.name, "status": batch.status,
@@ -334,22 +347,35 @@ def _normalize(
     raw: ElementTree.Element,
     source: NewsSource,
     loaded_at: str,
+    *,
+    fetch_article: Callable[[str], str | None] | None = None,
 ) -> tuple[ImportedNews | None, RejectedNews | None]:
-    title = _plain(_child(raw, "title"))
-    url = _url(_child(raw, "link"))
-    published = _published(_child(raw, "pubDate"))
-    text = _excerpt(_plain(_child(raw, "description")))
-    if len(text) < _MIN_TEXT and len(title) >= _MIN_TEXT:
-        text = _excerpt(title)
+    title = _plain(_child_local(raw, "title"))
+    url = _url(_child_local(raw, "link"))
+    published = _published(_child_local(raw, "pubDate") or _child_local(raw, "date"))
+    # RSS 2.0 часто содержит только короткий description; content:encoded может содержать полный текст.
+    rss_text = _html_to_text(
+        _child_local(raw, "encoded") or _child_local(raw, "content") or _child_local(raw, "description")
+    )
+    text = rss_text
+    if url and fetch_article:
+        try:
+            full_text = _html_to_text(fetch_article(url) or "")
+            if len(full_text) > len(text):
+                text = full_text
+        except (httpx.HTTPError, ValueError, UnicodeError) as error:
+            logger.info("news-article-extract-failed source=%s url=%s error=%s", source.id, url, error.__class__.__name__)
+    text = _limit_article_text(text)
     if not title:
         return None, RejectedNews(url=url, title=None, reason="нет заголовка")
     if url is None:
         return None, RejectedNews(url=None, title=title, reason="некорректный URL")
     if published is None:
         return None, RejectedNews(url=url, title=title, reason="нет или некорректна дата")
-    if not text:
-        return None, RejectedNews(url=url, title=title, reason="пустой текст")
-    identifier = _identifier(_child(raw, "guid"), url, source.id)
+    if len(text) < _MIN_TEXT:
+        return None, RejectedNews(url=url, title=title, reason="текст новости отсутствует или слишком короткий")
+    # Заголовок больше не подменяет содержание: это создавало фиктивные «новости» без фактов.
+    identifier = _identifier(_child_local(raw, "guid"), url, source.id)
     item = ImportedNews(
         id=identifier,
         url=url,
@@ -362,7 +388,6 @@ def _normalize(
         status="imported",
     )
     return item, None
-
 
 def _duplicate(item: ImportedNews, known: list[ImportedNews]) -> str | None:
     for earlier in known:
@@ -440,6 +465,12 @@ def _published(value: str) -> str | None:
             return date.fromisoformat(raw).isoformat()
         except ValueError:
             return None
+    # RSS extensions may publish W3C/ISO timestamps rather than RFC-2822 pubDate.
+    if "T" in raw:
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).date().isoformat()
+        except ValueError:
+            pass
     try:
         moment = parsedate_to_datetime(raw)
     except (TypeError, ValueError, IndexError, OverflowError):
@@ -477,3 +508,129 @@ def _similar(left: str, right: str) -> bool:
 def _child(raw: ElementTree.Element, name: str) -> str:
     found = raw.find(name)
     return "" if found is None or found.text is None else found.text
+
+
+def _child_local(raw: ElementTree.Element, name: str) -> str:
+    """Find RSS fields even when they use XML namespaces such as content:encoded or dc:date."""
+    for node in raw.iter():
+        if node.tag.rsplit("}", 1)[-1].split(":")[-1].casefold() == name.casefold():
+            return "".join(node.itertext()).strip()
+    return ""
+
+
+class _ArticleTextParser(HTMLParser):
+    """Extract readable article text while suppressing navigation and boilerplate."""
+
+    _SKIP = {"script", "style", "noscript", "svg", "nav", "footer", "header", "aside", "form", "button"}
+    _BLOCK = {"p", "div", "br", "li", "h1", "h2", "h3", "h4", "section", "article", "main", "tr"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.body: list[str] = []
+        self.stack: list[tuple[str, bool, int | None]] = []
+        self.active: list[int] = []
+        self.candidates: list[tuple[int, list[str]]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attrs_map = {key.casefold(): (value or "").casefold() for key, value in attrs}
+        parent_skipped = bool(self.stack and self.stack[-1][1])
+        skipped = parent_skipped or tag in self._SKIP
+        candidate_id = None
+        if not skipped:
+            marker = f"{attrs_map.get('id', '')} {attrs_map.get('class', '')}"
+            score = 100 if tag == "article" else 80 if tag == "main" else 0
+            if re.search(r"article[-_ ]?(body|content|text)|news[-_ ]?(body|content|text)|press[-_ ]?(body|content|text)|detail[-_ ]?content", marker):
+                score = max(score, 90)
+            elif re.search(r"content|article|news|press|detail|story", marker):
+                score = max(score, 45)
+            if score:
+                candidate_id = len(self.candidates)
+                self.candidates.append((score, []))
+                self.active.append(candidate_id)
+        self.stack.append((tag, skipped, candidate_id))
+        if not skipped and tag in self._BLOCK:
+            self._append("\\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        match = next((i for i in range(len(self.stack) - 1, -1, -1) if self.stack[i][0] == tag), None)
+        if match is None:
+            return
+        popped = self.stack[match:]
+        del self.stack[match:]
+        for _tag, _skipped, candidate_id in reversed(popped):
+            if candidate_id is not None and candidate_id in self.active:
+                self.active.remove(candidate_id)
+        if tag in self._BLOCK:
+            self._append("\\n")
+
+    def handle_data(self, data: str) -> None:
+        if self.stack and self.stack[-1][1]:
+            return
+        cleaned = data.strip()
+        if not cleaned:
+            return
+        self.body.append(cleaned)
+        for candidate_id in self.active:
+            self.candidates[candidate_id][1].append(cleaned)
+
+    def _append(self, value: str) -> None:
+        if not (self.stack and self.stack[-1][1]):
+            self.body.append(value)
+            for candidate_id in self.active:
+                self.candidates[candidate_id][1].append(value)
+
+    def text(self) -> str:
+        body = _SPACE.sub(" ", " ".join(self.body)).strip()
+        eligible = [
+            (score, _SPACE.sub(" ", " ".join(parts)).strip())
+            for score, parts in self.candidates
+        ]
+        eligible = [(score, text) for score, text in eligible if len(text) >= _MIN_ARTICLE_TEXT]
+        if eligible:
+            for _score, candidate_text in sorted(
+                eligible, key=lambda pair: (pair[0], min(len(pair[1]), _MAX_ARTICLE_TEXT)), reverse=True
+            ):
+                if len(candidate_text) >= len(body) * 0.25:
+                    return candidate_text
+        return body
+
+
+def _html_to_text(value: str) -> str:
+    if not value:
+        return ""
+    if "<" not in value:
+        return _SPACE.sub(" ", html.unescape(value)).strip()
+    parser = _ArticleTextParser()
+    parser.feed(html.unescape(value))
+    parser.close()
+    return parser.text()
+
+
+def _limit_article_text(value: str) -> str:
+    text = _SPACE.sub(" ", value).strip()
+    if len(text) <= _MAX_ARTICLE_TEXT:
+        return text
+    clipped = text[:_MAX_ARTICLE_TEXT].rsplit(" ", 1)[0]
+    return clipped or text[:_MAX_ARTICLE_TEXT]
+
+
+def _fetch_article(url: str, source: NewsSource, timeout_s: float) -> str | None:
+    parsed = urlsplit(url)
+    source_host = (urlsplit(source.url).hostname or "").casefold()
+    article_host = (parsed.hostname or "").casefold()
+    root_host = source_host.removeprefix("www.")
+    allowed_hosts = {source_host, root_host, f"www.{root_host}"}
+    if parsed.scheme != "https" or article_host not in allowed_hosts or parsed.username or parsed.password:
+        logger.warning("news-article-extract-skipped source=%s reason=host_not_allowed", source.id)
+        return None
+    response = httpx.get(
+        url, timeout=timeout_s, follow_redirects=False,
+        headers={"User-Agent": "NewBad/0.1 (+official RSS article extraction)", "Accept": "text/html,application/xhtml+xml"},
+    )
+    response.raise_for_status()
+    if len(response.content) > _MAX_ARTICLE_BYTES:
+        raise ValueError("страница статьи превышает лимит 2 МиБ")
+    content_type = response.headers.get("content-type", "").casefold()
+    if content_type and "html" not in content_type and "xhtml" not in content_type:
+        return None
+    return response.text

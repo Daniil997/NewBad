@@ -24,6 +24,17 @@ def store_imported_news(source_id: str, items: list[dict]) -> int:
     added = 0
     with connect_app() as connection:
         for item in items:
+            existing = connection.execute(
+                "SELECT id, text FROM news_articles WHERE url = ?", (item["url"],)
+            ).fetchone()
+            if existing:
+                # Preserve the stable record ID but enrich its body if the extractor found more content.
+                if len(item["text"]) > len(existing["text"]):
+                    connection.execute(
+                        "UPDATE news_articles SET text = ?, sha256 = ?, loaded_at = ? WHERE id = ?",
+                        (item["text"], item["sha256"], item["loaded_at"], existing["id"]),
+                    )
+                continue
             cursor = connection.execute(
                 """
                 INSERT OR IGNORE INTO news_articles (

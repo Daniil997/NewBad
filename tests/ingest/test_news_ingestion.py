@@ -135,11 +135,11 @@ def test_missing_date_url_and_text_are_not_invented(tmp_path):
     assert result.status == "rejected"
     assert result.items == []
     reasons = {item.reason for item in result.rejected}
-    assert reasons == {"нет или некорректна дата", "некорректный URL", "пустой текст", "нет заголовка"}
+    assert reasons == {"нет или некорректна дата", "некорректный URL", "текст новости отсутствует или слишком короткий", "нет заголовка"}
     assert list(tmp_path.glob("cbr-*.json")) == []
 
 
-def test_official_item_without_announcement_keeps_its_title(tmp_path):
+def test_item_with_only_a_title_is_rejected_instead_of_fabricating_body(tmp_path):
     title = "23 октября состоится пресс-конференция Совета директоров по денежно-кредитной политике"
     result = import_news(
         tmp_path,
@@ -148,10 +148,9 @@ def test_official_item_without_announcement_keeps_its_title(tmp_path):
         loaded_on=date(2026, 10, 23),
         min_interval_s=0,
     )
-    assert result.status == "imported"
-    assert result.items[0].text == title
-    assert result.items[0].published_at == "2026-10-23"
-    assert result.rejected == []
+    assert result.status == "rejected"
+    assert result.items == []
+    assert result.rejected[0].reason == "текст новости отсутствует или слишком короткий"
 
 
 def test_empty_feed_is_not_a_source_error(tmp_path):
@@ -271,3 +270,65 @@ def test_catalog_import_deduplicates_sources_and_persists_news_in_sqlite(monkeyp
     assert sum(item["duplicates"] for item in second.sources) == 2
     assert len(stored) == 1
     assert not list((tmp_path / "unused").glob("*.json"))
+
+
+
+def test_namespaced_content_encoded_is_used_as_full_rss_text(tmp_path):
+    body = " ".join(["Основной текст официальной публикации содержит важные факты, параметры и пояснения."] * 18)
+    payload = (
+        "<?xml version='1.0' encoding='utf-8'?>"
+        "<rss version='2.0' xmlns:content='http://purl.org/rss/1.0/modules/content/'>"
+        "<channel><item>"
+        f"<title>{_TITLE}</title><link>https://www.cbr.ru/press/event/?id=encoded</link>"
+        "<guid>docid_encoded</guid><pubDate>Fri, 11 Sep 2026 13:30:00 +0300</pubDate>"
+        f"<description>{html.escape(_TEXT)}</description>"
+        f"<content:encoded><![CDATA[<article><p>{body}</p></article>]]></content:encoded>"
+        "</item></channel></rss>"
+    )
+    result = import_news(
+        tmp_path, source=_SOURCE, fetch=lambda: payload,
+        loaded_on=date(2026, 10, 21), min_interval_s=0,
+    )
+    assert result.status == "imported"
+    assert len(result.items[0].text) > 600
+    assert "параметры и пояснения" in result.items[0].text
+
+
+def test_full_article_html_is_preferred_and_navigation_is_removed(tmp_path):
+    body = " ".join(["В основной части публикации описаны факты, решения и последствия для финансового рынка."] * 16)
+    page = (
+        "<html><body><nav>Главная Меню Контакты</nav>"
+        f'<article class="article-body"><h1>{_TITLE}</h1><p>{body}</p></article>'
+        "<footer>Подписаться на рассылку</footer></body></html>"
+    )
+    source = _SOURCE.model_copy(update={"article_mode": "html"})
+    result = import_news(
+        tmp_path, source=source,
+        fetch=lambda: _feed(_item(text=_TEXT)),
+        fetch_article=lambda _url: page,
+        loaded_on=date(2026, 10, 21), min_interval_s=0,
+    )
+    assert result.status == "imported"
+    assert len(result.items[0].text) > len(_TEXT)
+    assert "Главная Меню Контакты" not in result.items[0].text
+    assert "Подписаться на рассылку" not in result.items[0].text
+    assert "финансового рынка" in result.items[0].text
+
+
+def test_stored_article_is_enriched_when_later_fetch_has_more_text(monkeypatch, tmp_path):
+    from app.news_store import imported_news, store_imported_news
+
+    monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "app.sqlite3"))
+    base = {
+        "id": "cbr-article-1", "source": "Банк России", "url": "https://www.cbr.ru/press/event/?id=enrich",
+        "title": _TITLE, "published_at": "2026-10-21", "loaded_at": "2026-10-21",
+        "sha256": "a" * 64, "status": "imported",
+    }
+    store_imported_news("cbr_press", [{**base, "text": _TEXT}])
+    long_text = " ".join(["Полный текст публикации содержит важные подробности и условия принятого решения."] * 10)
+    store_imported_news("cbr_press", [{**base, "id": "new-guid-id", "text": long_text, "sha256": "b" * 64}])
+    stored = imported_news()
+    assert len(stored) == 1
+    assert stored[0]["id"] == "cbr-article-1"
+    assert stored[0]["text"] == long_text
+    assert stored[0]["sha256"] == "b" * 64
