@@ -4,8 +4,9 @@ from app.agent.loop_context import AgentContext
 from app.corpus.search import BankDocument
 
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
-_UP = ("рост", "повыш", "выше", "ускор", "увелич")
-_DOWN = ("сниж", "ниже", "замедл", "паден", "сокращ", "дефляц")
+# Основы ищутся с начала слова: «рост» не должен находиться внутри «просто», а «выше» внутри «вышедших».
+_UP = re.compile(r"(?<!\w)(?:рост|прирост|повыш|ускор|увелич)|(?<!\w)выше(?!\w)")
+_DOWN = re.compile(r"(?<!\w)(?:сниж|замедл|паден|сокращ|дефляц)|(?<!\w)ниже(?!\w)")
 _INFERENCE_CAP = 0.5
 _BARE_CAP = 0.3
 
@@ -132,13 +133,16 @@ def _lower_confidence(card, ctx: AgentContext) -> None:
 
 
 def _sources_conflict(card) -> bool:
+    """Новость и банк однозначно говорят в разные стороны.
+
+    Если в одном тексте есть и рост, и снижение («инфляция замедлилась, но рост цен сохраняется»),
+    направление неоднозначно. Это не противоречие источников и не повод отклонять карточку: иначе
+    конфликт не снять даже скрытием позиции банка, потому что он в самой новости.
+    """
     fact = " ".join(claim.text for claim in card.what_happened.claims if claim.layer == "confirmed_fact")
-    bank = card.bank_view.quote
     fact_lean = _lean(fact)
-    bank_lean = _lean(bank)
-    if fact_lean and bank_lean and fact_lean != bank_lean:
-        return True
-    return _lean(fact) == "both" or _lean(bank) == "both"
+    bank_lean = _lean(card.bank_view.quote)
+    return fact_lean in {"up", "down"} and bank_lean in {"up", "down"} and fact_lean != bank_lean
 
 
 def _fact_in_sources(claim, card, ctx: AgentContext) -> bool:
@@ -243,8 +247,8 @@ def _card_text(card) -> str:
 
 def _lean(text: str) -> str | None:
     folded = text.lower().replace("ё", "е")
-    up = any(stem in folded for stem in _UP)
-    down = any(stem in folded for stem in _DOWN)
+    up = _UP.search(folded) is not None
+    down = _DOWN.search(folded) is not None
     if up and down:
         return "both"
     if up:
