@@ -156,9 +156,10 @@ def test_geography_is_limited_to_places_explicitly_cited(monkeypatch):
         },
     ]})
     page = SitePage("https://example.org/", "География", "Поставляем товары в Казахстан и Узбекистан.")
-    # Both values are rejected on the first row; the next valid row can be accepted.
+    # An unsupported destination invalidates that proposal; the verified one survives.
     result = site_extract.extract_profile_suggestions([page], {})
-    assert result.suggestions == []  # Inflected place names are not exact geographic evidence.
+    assert [item["field_name"] for item in result.suggestions] == ["market_geographies"]
+    assert result.suggestions[0]["value"] == ["Казахстан", "Узбекистан"]
 
 
 def test_taxonomy_tags_need_industry_evidence(monkeypatch):
