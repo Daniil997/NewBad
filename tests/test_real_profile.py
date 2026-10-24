@@ -124,7 +124,14 @@ def test_site_analysis_requires_consent_and_writes_empty_fields(monkeypatch, tmp
         # Only an explicit acceptance may fill the company's profile.
         accepted = client.post("/api/real/profile/suggestions/apply", headers=csrf)
         filled = client.get("/api/real/profile").json()["profile"]
+        citations = client.get("/api/real/profile/sources").json()["sources"]
         still_pending = client.get("/api/real/profile/suggestions").json()["suggestions"]
+        # Once the owner manually changes the value, the old quote is no longer attribution.
+        overridden = client.put(
+            "/api/real/profile", headers=csrf,
+            json={"website": "https://example.org", "company_name": "Моя компания"},
+        )
+        after_override = client.get("/api/real/profile/sources").json()["sources"]
 
     assert no_consent.status_code == 400
     assert analyzed.status_code == 200
@@ -139,3 +146,8 @@ def test_site_analysis_requires_consent_and_writes_empty_fields(monkeypatch, tmp
     assert accepted.json()["filled_fields"] == ["company_name"]
     assert filled["company_name"] == "ООО Север"
     assert still_pending == []
+    assert len(citations) == 1
+    assert citations[0]["source_url"] == "https://example.org/"
+    assert citations[0]["evidence"] == "Компания ООО Север производит упаковку."
+    assert overridden.status_code == 200
+    assert after_override == []
