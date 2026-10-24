@@ -121,12 +121,21 @@ def test_site_analysis_requires_consent_and_writes_empty_fields(monkeypatch, tmp
         after = client.get("/api/real/profile").json()["profile"]
         pending = client.get("/api/real/profile/suggestions").json()["suggestions"]
         too_soon = client.post("/api/real/profile/site-analysis", headers=csrf, json={"consent": True})
+        # Only an explicit acceptance may fill the company's profile.
+        accepted = client.post("/api/real/profile/suggestions/apply", headers=csrf)
+        filled = client.get("/api/real/profile").json()["profile"]
+        still_pending = client.get("/api/real/profile/suggestions").json()["suggestions"]
 
     assert no_consent.status_code == 400
     assert analyzed.status_code == 200
-    assert analyzed.json()["status"] == "applied"
-    assert analyzed.json()["filled_fields"] == ["company_name"]
-    assert analyzed.json()["profile"]["company_name"] == "ООО Север"
-    assert after["company_name"] == "ООО Север"
-    assert pending == []
+    assert analyzed.json()["status"] == "suggestions_ready"
+    assert analyzed.json()["filled_fields"] == []
+    assert analyzed.json()["profile"]["company_name"] == ""
+    assert analyzed.json()["pages"][0]["url"] == "https://example.org/"
+    assert after["company_name"] == ""
+    assert len(pending) == 1
     assert too_soon.status_code == 429
+    assert accepted.status_code == 200
+    assert accepted.json()["filled_fields"] == ["company_name"]
+    assert filled["company_name"] == "ООО Север"
+    assert still_pending == []
