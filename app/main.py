@@ -691,7 +691,7 @@ def _real_feed_payload(user_id: str, *, enqueue_manual: bool = False, refresh_in
     )
     should_enqueue = enqueue_manual
     trigger = settings["personal_analysis_trigger"]
-    if not skip_auto_queue and not enqueue_manual and missing and trigger == "first_then_manual" and current_analysis_count == 0 and latest_job is None:
+    if not skip_auto_queue and not enqueue_manual and missing and trigger == "first_then_manual" and current_analysis_count == 0 and (latest_job is None or latest_job["status"] not in {"queued", "running"}):
         should_enqueue = True
     if not skip_auto_queue and not enqueue_manual and missing and trigger == "on_new_interval":
         due = latest_job is None
@@ -714,7 +714,7 @@ def _real_feed_payload(user_id: str, *, enqueue_manual: bool = False, refresh_in
     with connect_app() as connection:
         saved_reports = connection.execute(
             "SELECT news_id, news_hash, report_json, created_at FROM profile_news_reports "
-            "WHERE profile_id = ? AND profile_version = ? AND report_version = 'profile-news-report-v1'",
+            "WHERE profile_id = ? AND profile_version = ? AND report_version = 'profile-news-report-v2'",
             (profile_id, profile_version),
         ).fetchall()
     reports_by_id = {row["news_id"]: row for row in saved_reports}
@@ -784,7 +784,7 @@ def create_profile_news_report(news_id: str, payload: ProfileNewsReportRequest, 
     if news is None:
         raise HTTPException(status_code=404, detail="Новость отсутствует в актуальном официальном окне")
     news_hash = article_hash(news)
-    report_version = "profile-news-report-v1"
+    report_version = "profile-news-report-v2"
     task_route = resolve_route("heavy", task="news_report", space="real")
     logger.info(
         "news_report_start news_id=%s profile_id=%s refresh=%s task_route_mode=%s task_route_provider=%s task_route_model=%s task_route_reason=%s",
