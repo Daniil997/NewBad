@@ -92,6 +92,7 @@ def import_news(
     *,
     source: NewsSource | None = None,
     fetch: Callable[[], str] | None = None,
+    fetch_article: Callable[[str], str | None] | None = None,
     loaded_on: date | None = None,
     min_interval_s: float | None = None,
     max_age_days: int | None = None,
