@@ -647,6 +647,7 @@ def decide_profile_suggestion(user_id: str, field_name: str, source_url: str, *,
     allowed_fields = {
         "company_name", "country", "region", "city", "description", "industry",
         "industry_tags", "products_services", "customer_types", "business_model",
+        "dependencies", "market_geographies",
     }
     if field_name not in allowed_fields:
         return "not_found"
