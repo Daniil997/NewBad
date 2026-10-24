@@ -20,7 +20,7 @@ DEFAULT_DEVELOPER_SETTINGS = {
         "real": {"profile_site": "mock", "news_report": "mock", "news_selection": "mock", "chat": "mock"},
         "demo": {"news_card": "mock", "news_card_fact": "mock", "news_card_copy": "mock", "chat": "mock"},
     },
-    "news_lookback_days": 3,
+    "news_lookback_days": 14,
     "news_retention_days": 90,
     "news_max_items": 500,
     "news_collection_interval_hours": 0,
