@@ -47,7 +47,8 @@ def import_rss() -> int:
     for source in batch.sources:
         print(
             f"{source['source']}: {source['status']}, новых {source['imported']}, "
-            f"дублей {source['duplicates']}, отклонено {source['rejected']}"
+            f"дублей {source['duplicates']}, пропущено по возрасту {source.get('skipped_old', 0)}, "
+            f"отклонено из-за качества {source['rejected']}"
         )
     print(f"SQLite: осталось новостей {retention['remaining']}")
     return 1 if batch.status == "error" else 0
