@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from app.db import ROOT
 from app.main import app
 from app.profile.case_data import clear_case_cache
-from app.profile.sources import using_case_extract
+from app.profile.sources import case_dir, using_case_extract
 from app.schemas.card import Card
 from eval.metrics import source_supported_share, unsupported_claim_ids
 
@@ -14,7 +14,7 @@ def test_unseen_pasted_news_stays_grounded_and_outside_tuning_set(monkeypatch, t
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("LLM_MODE", "mock")
     monkeypatch.setenv("PROFILE_SOURCE", "case")
-    if not using_case_extract():
+    if not using_case_extract() or case_dir() is None:
         pytest.skip("Рядом нет папки DATA с выгрузкой компаний кейса")
     clear_case_cache()
     holdout = yaml.safe_load((ROOT / "eval" / "holdout_news.yaml").read_text(encoding="utf-8"))
