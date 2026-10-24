@@ -144,3 +144,33 @@ def test_feedback_is_persisted_and_metrics_are_aggregated(monkeypatch, tmp_path)
     assert invalid.status_code == 404
     assert metrics.json() == {"responses": 2, "helpful": 1, "not_helpful": 1, "helpful_share": 0.5}
     assert "U-SAVER" not in metrics.text
+
+def test_focused_chat_keeps_only_the_selected_news_even_outside_lookback(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.main import _profile_chat_evidence
+
+    focused = SimpleNamespace(
+        id="old-news", status="imported", title="Ставка валютного свопа",
+        excerpt="Изменение условий операций в юанях.", url="https://example.test/news",
+        published_at="2026-01-01", source="Официальный источник",
+    )
+    unrelated = SimpleNamespace(
+        id="fresh-news", status="imported", title="Другая новость",
+        excerpt="Несвязанный материал.", url="https://example.test/other",
+        published_at="2026-10-01", source="Официальный источник",
+    )
+    monkeypatch.setattr("app.main.developer_settings", lambda: {"news_lookback_days": 3})
+    monkeypatch.setattr("app.main._fresh_real_news", lambda _days: [unrelated])
+    monkeypatch.setattr("app.main.load_news", lambda: [focused, unrelated])
+    monkeypatch.setattr("app.main.market_snapshot", lambda: {"items": []})
+
+    saved = {"profile": {"company_name": "Пример", "industry": "Услуги связи"}}
+    evidence = _profile_chat_evidence(saved, "old-news")
+
+    news = [item for item in evidence if item["kind"] == "news"]
+    assert len(news) == 1
+    assert news[0]["evidence_id"] == "news:old-news"
+    assert news[0]["focus"] is True
+    assert "Несвязанный материал" not in str(news)
+
