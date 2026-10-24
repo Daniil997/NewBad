@@ -118,11 +118,30 @@ Write-Host "API:  http://127.0.0.1:8000/docs"
 Write-Host "UI:   http://127.0.0.1:5173"
 Write-Host "Stop: Ctrl+C"
 
+# Open the browser only once Vite is actually serving its page.
+$BrowserJob = Start-Job -ArgumentList "http://127.0.0.1:5173/" -ScriptBlock {
+    param([string]$Url)
+    for ($attempt = 0; $attempt -lt 60; $attempt++) {
+        try {
+            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
+            if ($response.StatusCode -eq 200) {
+                Start-Process $Url
+                return
+            }
+        } catch { }
+        Start-Sleep -Milliseconds 500
+    }
+}
+
 try {
     Push-Location $UiDir
     npm run dev
 } finally {
     Pop-Location
+    if ($BrowserJob) {
+        Stop-Job -Job $BrowserJob -ErrorAction SilentlyContinue
+        Remove-Job -Job $BrowserJob -Force -ErrorAction SilentlyContinue
+    }
     if ($Api -and -not $Api.HasExited) {
         & taskkill.exe /PID $Api.Id /T /F | Out-Null
     }
