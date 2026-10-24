@@ -362,3 +362,25 @@ def test_listing_page_is_not_used_as_article_body(tmp_path):
     assert result.items[0].text == _TEXT
     assert "Проект нормативного документа" not in result.items[0].text
     assert "Последнее обновление страницы" not in result.items[0].text
+
+
+def test_stored_listing_page_body_is_replaced_by_clean_rss_summary(monkeypatch, tmp_path):
+    from app.news_store import imported_news, store_imported_news
+
+    monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "app.sqlite3"))
+    polluted = "Проекты нормативных актов Банка России Публичное обсуждение " + (
+        "Проект положения Банка России с перечнем документов и ссылок. " * 15
+    ) + "Страница была полезной? Последнее обновление страницы: 23.10.2026"
+    base = {
+        "id": "cbr-listing-1", "source": "Банк России", "url": "https://www.cbr.ru/Projects/",
+        "title": "Проекты нормативных актов Банка России", "published_at": "2026-10-21",
+        "loaded_at": "2026-10-21", "sha256": "a" * 64, "status": "imported",
+    }
+    store_imported_news("cbr_news", [{**base, "text": polluted}])
+    summary = "Банк России опубликовал проект нормативного акта для публичного обсуждения до 5 ноября 2026 года."
+    store_imported_news("cbr_news", [{**base, "text": summary, "sha256": "b" * 64}])
+    stored = imported_news()
+    assert len(stored) == 1
+    assert stored[0]["id"] == "cbr-listing-1"
+    assert stored[0]["text"] == summary
+    assert stored[0]["sha256"] == "b" * 64
