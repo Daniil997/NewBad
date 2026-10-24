@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { MarkdownText } from "./MarkdownText";
 import {
   formatDateTime, formatDay, formatPrice, profileProgress, relevanceInfo,
   type BusinessProfile, type ChatMessage, type Interest, type MarketHistory, type ProfileOptions,
@@ -245,7 +246,7 @@ export function ChatPanel({ sessionId, csrf, companyName, onBack, backLabel }: {
         {messages.map((message, index) => (
           <article className={`chat-msg ${message.role}`} key={`${message.created_at}-${index}`}>
             <span className="who">{message.role === "user" ? "Вы" : "Помощник"}</span>
-            <p>{message.text}</p>
+            <MarkdownText text={message.text} />
             {message.citations.length ? (
               <p className="chat-cites">Материалы: {message.citations.map((citation, citationIndex) => (
                 <span key={`${citation.url}-${citationIndex}`}>{citationIndex ? " · " : ""}
