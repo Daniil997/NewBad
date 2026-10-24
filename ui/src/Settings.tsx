@@ -267,7 +267,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
           <p className="hint">Персональная подборка использует выбранную модель для смысловой оценки кандидатов. При недоступности модели или некорректном ответе применяется fallback на правила. Сбор RSS и котировок не вызывает LLM.</p>
         </fieldset>
         <fieldset>
-          <legend>Тестовый режим</legend>
+          <legend>Тестовые данные</legend>
           {([["news_card_fact", "Извлечение факта из новости"], ["news_card_copy", "Анализ и формирование выводов"], ["chat", "Чат тестового режима"]] as const).map(([task, label]) => <label key={task}>{label}
             <select value={taskRoutes.demo?.[task] || "mock"} onChange={(event) => setTaskRoutes((routes) => ({ ...routes, demo: { ...routes.demo, [task]: event.target.value } }))}>
               {TASK_ROUTE_OPTIONS.map(([value, title]) => <option key={value} value={value}>{title}</option>)}
@@ -305,7 +305,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
         {saved ? <p>{saved}</p> : null}
       </form>
       <section className="card">
-        <h2>Тестовые данные</h2>
+        <h2>Сброс тестовых данных</h2>
         <p className="hint">Сброс удаляет только результаты работы тестового режима и историю запусков. Встроенные тестовые компании и исходные материалы сохраняются, поэтому функционал можно проверить повторно с чистого состояния.</p>
         <button className="secondary" type="button" onClick={() => void resetDemoData()} disabled={resettingDemo}>
           {resettingDemo ? "Сбрасываем…" : "Сбросить полученные данные"}
