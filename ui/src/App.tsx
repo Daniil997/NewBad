@@ -72,6 +72,7 @@ export function App() {
         onModeChange={changeMode}
         onHome={() => setScreen("home")}
         onLogout={leave}
+        onSwitch={enter}
       />
     );
   }
