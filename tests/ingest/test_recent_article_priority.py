@@ -95,3 +95,20 @@ def test_atom_entry_with_href_and_iso_date_is_supported(tmp_path):
     assert result.status == "imported"
     assert result.items[0].url.endswith("id=atom")
     assert result.items[0].published_at == "2026-10-24"
+
+
+def test_similar_titles_on_same_day_preserve_distinct_articles(tmp_path):
+    first = item("Банк России сообщил о новых условиях кредитования банков", "Sat, 24 Oct 2026 10:00:00 +0300", 7)
+    second = (
+        item("Банк России сообщил о новых условиях кредитования банков и компаний",
+             "Sat, 24 Oct 2026 13:00:00 +0300", 8)
+        .replace(
+            "Опубликованы новые официальные условия работы финансовых организаций и участников рынка.",
+            "Опубликованы отдельные изменения требований к участникам рынка капитала и платежным системам.",
+        )
+    )
+    result = import_news(
+        tmp_path, source=SOURCE.model_copy(update={"article_mode": "rss_only"}),
+        fetch=lambda: feed(first, second), loaded_on=date(2026, 10, 24), min_interval_s=0,
+    )
+    assert len([row for row in result.items if row.status == "imported"]) == 2
