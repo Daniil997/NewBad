@@ -61,13 +61,14 @@ export function Settings({ onBack }: { onBack: () => void }) {
   const [validateNumericGrounding, setValidateNumericGrounding] = useState(true);
   const [taskRoutes, setTaskRoutes] = useState<Record<string, Record<string, string>>>({
     real: { profile_site: "mock", news_report: "mock", news_selection: "mock", chat: "mock" },
-    demo: { news_card: "mock", chat: "mock" },
+    demo: { news_card: "mock", news_card_fact: "mock", news_card_copy: "mock", chat: "mock" },
   });
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [busy, setBusy] = useState(false);
   const [collecting, setCollecting] = useState(false);
   const [clearingNews, setClearingNews] = useState(false);
+  const [resettingDemo, setResettingDemo] = useState(false);
   const [collectingMarket, setCollectingMarket] = useState(false);
 
   async function refreshNewsStatus() {
@@ -114,6 +115,8 @@ export function Settings({ onBack }: { onBack: () => void }) {
           },
           demo: {
             news_card: normalizeRoute(payload.task_routes?.demo?.news_card),
+            news_card_fact: normalizeRoute(payload.task_routes?.demo?.news_card_fact ?? payload.task_routes?.demo?.news_card),
+            news_card_copy: normalizeRoute(payload.task_routes?.demo?.news_card_copy ?? payload.task_routes?.demo?.news_card),
             chat: normalizeRoute(payload.task_routes?.demo?.chat),
           },
         });
@@ -183,6 +186,26 @@ export function Settings({ onBack }: { onBack: () => void }) {
     }
   }
 
+  async function resetDemoData() {
+    const confirmed = window.confirm(
+      "Сбросить результаты тестового режима? Будут удалены история чата, карточки/кэш, шаги агента, вызовы инструментов и LLM, добавленные вручную новости и оценки. Встроенные тестовые компании и исходные материалы останутся."
+    );
+    if (!confirmed) return;
+    setResettingDemo(true);
+    setError("");
+    setSaved("");
+    try {
+      const response = await fetch("/api/settings/demo/reset", { method: "POST" });
+      const payload = await response.json().catch(() => null) as { status?: string; removed?: number; detail?: string } | null;
+      if (!response.ok || !payload) throw new Error(payload?.detail || "Не удалось сбросить тестовые данные");
+      setSaved(`Тестовые данные сброшены: удалено записей — ${payload.removed ?? 0}. Теперь можно заново открыть тестовую компанию и проверить генерацию карточки и чат.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось сбросить тестовые данные");
+    } finally {
+      setResettingDemo(false);
+    }
+  }
+
   async function collectNews() {
     setCollecting(true);
     setError("");
@@ -245,11 +268,12 @@ export function Settings({ onBack }: { onBack: () => void }) {
         </fieldset>
         <fieldset>
           <legend>Тестовый режим</legend>
-          {([["news_card", "Формирование карточки новости"], ["chat", "Чат тестового режима"]] as const).map(([task, label]) => <label key={task}>{label}
+          {([["news_card_fact", "Извлечение факта из новости"], ["news_card_copy", "Анализ и формирование выводов"], ["chat", "Чат тестового режима"]] as const).map(([task, label]) => <label key={task}>{label}
             <select value={taskRoutes.demo?.[task] || "mock"} onChange={(event) => setTaskRoutes((routes) => ({ ...routes, demo: { ...routes.demo, [task]: event.target.value } }))}>
               {TASK_ROUTE_OPTIONS.map(([value, title]) => <option key={value} value={value}>{title}</option>)}
             </select>
           </label>)}
+          <p className="hint">Для факта и аналитических выводов можно назначить разные модели. Старые настройки «Формирование карточки новости» автоматически используются как резервное значение, если новые маршруты ещё не сохранены.</p>
         </fieldset>
         <h2>Проверки ответов модели</h2>
         <fieldset>
@@ -280,6 +304,13 @@ export function Settings({ onBack }: { onBack: () => void }) {
         <button type="submit" disabled={busy}>{busy ? "Сохраняем…" : "Сохранить все настройки"}</button>
         {saved ? <p>{saved}</p> : null}
       </form>
+      <section className="card">
+        <h2>Тестовые данные</h2>
+        <p className="hint">Сброс удаляет только результаты работы тестового режима и историю запусков. Встроенные тестовые компании и исходные материалы сохраняются, поэтому функционал можно проверить повторно с чистого состояния.</p>
+        <button className="secondary" type="button" onClick={() => void resetDemoData()} disabled={resettingDemo}>
+          {resettingDemo ? "Сбрасываем…" : "Сбросить полученные данные"}
+        </button>
+      </section>
       <section className="card">
         <h2>Источники новостей</h2>
         {newsStatus ? <>
