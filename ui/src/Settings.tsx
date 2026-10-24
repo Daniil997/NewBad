@@ -18,7 +18,7 @@ type NewsStatus = {
   sources: { id: string; name: string; url: string }[];
   latest: null | {
     status: string; finished_at: string;
-    sources: { source: string; status: string; imported: number; duplicates: number; rejected: number; error: string; rejection_reasons?: Record<string, number>; rejected_examples?: { title: string; url: string; reason: string }[] }[];
+    sources: { source: string; status: string; imported: number; duplicates: number; rejected: number; seen?: number; article_fetches?: number; skipped_old?: number; skipped_future?: number; error: string; rejection_reasons?: Record<string, number>; rejected_examples?: { title: string; url: string; reason: string }[] }[];
   };
   stored_count: number;
 };
@@ -320,11 +320,11 @@ export function Settings({ onBack }: { onBack: () => void }) {
             <button type="button" onClick={() => void collectNews()} disabled={collecting || clearingNews}>{collecting ? "Собираем…" : "Собрать сейчас"}</button>
             <button className="secondary" type="button" onClick={() => void clearNewsDatabase()} disabled={collecting || clearingNews}>{clearingNews ? "Очищаем…" : "Очистить базу новостей"}</button>
           </div>
-          <p className="hint">Чтобы проверить актуальный парсер на чистой базе: очистите новости, затем нажмите «Собрать сейчас». Сбор загружает текст статей из официальных RSS-источников и их страниц.</p>
+          <p className="hint">Чтобы проверить актуальный парсер на чистой базе: очистите новости, затем нажмите «Собрать сейчас». Сбор загружает публикации из официальных RSS и их страниц. Записи старше выбранного периода считаются пропущенными, а не ошибочными. При существующей базе новые статьи могут оказаться дублями.</p>
           {newsStatus.latest ? <>
             <p>Последний запуск: {new Date(newsStatus.latest.finished_at).toLocaleString("ru-RU")} · {newsStatus.latest.status}</p>
             <ul>{newsStatus.latest.sources.map((item) => <li key={item.source}>
-              <strong>{item.source}</strong>: {item.status}; новых {item.imported}, дублей {item.duplicates}, отклонено {item.rejected}{item.error ? ` (ошибка: ${item.error})` : ""}
+              <strong>{item.source}</strong>: {item.status}; записей RSS {item.seen ?? "—"}, HTML-страниц обработано {item.article_fetches ?? "—"}, новых {item.imported}, дублей {item.duplicates}, за пределами периода {item.skipped_old ?? 0}, отклонено из-за качества {item.rejected}{item.skipped_future ? `, с будущей датой ${item.skipped_future}` : ""}{item.error ? ` (ошибка: ${item.error})` : ""}
               {item.rejection_reasons && Object.keys(item.rejection_reasons).length ? <ul>
                 {Object.entries(item.rejection_reasons).sort((a, b) => b[1] - a[1]).map(([reason, count]) => <li key={reason}>{reason}: {count}</li>)}
               </ul> : null}
