@@ -135,7 +135,7 @@ def test_missing_date_url_and_text_are_not_invented(tmp_path):
     assert result.status == "rejected"
     assert result.items == []
     reasons = {item.reason for item in result.rejected}
-    assert reasons == {"нет или некорректна дата", "некорректный URL", "пустой текст", "нет заголовка"}
+    assert reasons == {"нет или некорректна дата", "некорректный URL", "текст новости отсутствует или слишком короткий", "нет заголовка"}
     assert list(tmp_path.glob("cbr-*.json")) == []
 
 
