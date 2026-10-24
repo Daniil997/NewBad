@@ -123,10 +123,12 @@ export function NewsDetail({ item, reportBusy, chatBusy, onReport, onChat }: {
         <div className="real-block-heading"><h3>Что произошло</h3><span className="real-layer-tag fact">Факт · первоисточник</span></div>
         <p className="hint small">Текст официальной публикации, отдельно от аналитических выводов.</p>
         {item.excerpt ? (
-          <details className="real-source-text">
-            <summary>{item.excerpt.length > 560 ? item.excerpt.slice(0, 560).trimEnd() + "…" : item.excerpt}</summary>
-            <div className="real-source-full"><p>{item.excerpt}</p></div>
-          </details>
+          item.excerpt.length > 560 ? (
+            <details className="real-source-text">
+              <summary>{item.excerpt.slice(0, 560).trimEnd() + "…"}</summary>
+              <div className="real-source-full"><p>{item.excerpt}</p></div>
+            </details>
+          ) : <p className="real-source-text real-source-short">{item.excerpt}</p>
         ) : <p className="hint">Текст публикации не загружен.</p>}
       </section>
 
@@ -134,7 +136,7 @@ export function NewsDetail({ item, reportBusy, chatBusy, onReport, onChat }: {
         <div className="real-block-heading"><h3>Что это значит для вас</h3><span className="real-layer-tag estimate">Аналитическая оценка</span></div>
         {report ? (
           <div className="report real-report">
-            <p className="real-card-lead">{report.summary}</p>
+            <div className="real-card-lead"><MarkdownText text={report.summary} /></div>
             <div className="real-report-meaning">
               <h4>Как событие может повлиять на бизнес</h4>
               <MarkdownText text={report.relevance} />
