@@ -119,3 +119,44 @@ def test_named_host_does_not_follow_a_sibling_or_foreign_site(monkeypatch):
     assert foreign.pages == []
     assert any("за пределы" in warning for warning in foreign.warnings)
 
+
+
+def test_company_information_pages_are_crawled_before_news_and_login(monkeypatch):
+    robots = RobotFileParser()
+    robots.parse(["User-agent: *", "Allow: /"])
+    monkeypatch.setattr(site_crawler, "_load_robots", lambda *args: (robots, ""))
+    monkeypatch.setattr(site_crawler, "MAX_PAGES", 3)
+    visited = []
+
+    def fetch(url, host, deadline, max_bytes, allow_family=False):
+        visited.append(url)
+        if url == "https://example.org/":
+            html = (
+                '<html><head><title>Пример</title></head><body>'
+                '<header>Навигация и каталог</header><nav><a href="/news">Новости</a>'
+                '<a href="/login">Войти</a><a href="/contacts">Контакты</a>'
+                '<a href="/services">Услуги</a><a href="/about">О компании</a></nav>'
+                '<main><h1>Компания производит упаковку</h1><p>Наши продукты доступны клиентам.</p></main>'
+                '<footer>Политика конфиденциальности</footer></body></html>'
+            )
+        else:
+            html = "<html><main><p>Описание деятельности подразделения компании.</p></main></html>"
+        return SafeResponse(
+            200, {"content-type": "text/html; charset=utf-8"},
+            html.encode("utf-8"), url,
+        )
+
+    monkeypatch.setattr(site_crawler, "_request_following_same_host", fetch)
+    result = site_crawler.crawl_site("https://example.org/")
+    assert visited == [
+        "https://example.org/", "https://example.org/about", "https://example.org/services",
+    ]
+    assert "Навигация и каталог" not in result.pages[0].text
+    assert "Политика конфиденциальности" not in result.pages[0].text
+    assert "Компания производит упаковку Наши продукты" in result.pages[0].text
+
+
+def test_public_page_text_keeps_word_boundaries_between_html_blocks():
+    parser = site_crawler._VisibleTextParser()
+    parser.feed("<main><h1>Товары</h1><p>Упаковка</p><p>Контейнеры</p></main>")
+    assert parser.text == "Товары Упаковка Контейнеры"
