@@ -602,7 +602,7 @@ class _ArticleTextParser(HTMLParser):
                 self.candidates[candidate_id][1].append(value)
 
     def text(self) -> str:
-        body = _SPACE.sub(" ", " ".join(self.body)).strip()
+        body = _strip_page_boilerplate(_SPACE.sub(" ", " ".join(self.body)).strip())
         folded = body.casefold()
         # CBR RSS sometimes links to a section/index page rather than an individual
         # publication. Such pages contain many linked document titles and page chrome;
@@ -620,7 +620,7 @@ class _ArticleTextParser(HTMLParser):
         if page_chrome or link_heavy_listing:
             return ""
         eligible = [
-            (score, _SPACE.sub(" ", " ".join(parts)).strip())
+            (score, _strip_page_boilerplate(_SPACE.sub(" ", " ".join(parts)).strip()))
             for score, parts in self.candidates
         ]
         eligible = [(score, text) for score, text in eligible if len(text) >= _MIN_ARTICLE_TEXT]
@@ -631,6 +631,21 @@ class _ArticleTextParser(HTMLParser):
                 if len(candidate_text) >= len(body) * 0.25:
                     return candidate_text
         return body
+
+
+def _strip_page_boilerplate(value: str) -> str:
+    """Remove recurring CBR page controls and metadata that are not article content."""
+    text = value
+    patterns = (
+        r"(?i)\\bстраница была полезной\\s*\\?",
+        r"(?i)\\bответственное структурное подразделение\\s*:\\s*.*$",
+        r"(?i)\\bпоследнее обновление страницы\\s*:?\\s*.*$",
+        r"(?i)\\bверсия для печати\\b",
+        r"(?i)\\bподелиться\\b",
+    )
+    for pattern in patterns:
+        text = re.sub(pattern, " ", text)
+    return _SPACE.sub(" ", text).strip(" \\t\\r\\n|·—-:")
 
 
 def _html_to_text(value: str) -> str:
