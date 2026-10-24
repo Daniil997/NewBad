@@ -879,3 +879,52 @@ details.paste {
     font-size: 0.85rem;
   }
 }
+
+
+/* Structured Markdown in assistant chat replies */
+.messages .answer-content {
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.messages .answer-content > :first-child {
+  margin-top: 0;
+}
+
+.messages .answer-content > :last-child {
+  margin-bottom: 0;
+}
+
+.messages .answer-content h1,
+.messages .answer-content h2,
+.messages .answer-content h3,
+.messages .answer-content h4 {
+  margin: 0.85rem 0 0.35rem;
+  line-height: 1.3;
+  font-size: 1rem;
+}
+
+.messages .answer-content h1 {
+  font-size: 1.1rem;
+}
+
+.messages .answer-content p {
+  white-space: normal;
+  margin: 0.45rem 0;
+}
+
+.messages .answer-content ul,
+.messages .answer-content ol {
+  margin: 0.4rem 0 0.65rem;
+  padding-left: 1.5rem;
+}
+
+.messages .answer-content li {
+  margin: 0.25rem 0;
+  padding: 0;
+  border-radius: 0;
+}
+
+.messages .answer-content li > p {
+  margin: 0.2rem 0;
+}
