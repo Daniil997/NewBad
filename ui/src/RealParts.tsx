@@ -365,18 +365,29 @@ export function MarketsPanel({ markets, histories, historyBusy, onToggle }: {
 
 /* ───────────── Предложения по сайту ───────────── */
 
-export function SuggestionsPanel({ suggestions, warnings, busy, dirty, label, fieldLabels, onDecide }: {
+export function SuggestionsPanel({ suggestions, warnings, busy, dirty, label, fieldLabels, onDecide, onAcceptAll }: {
   suggestions: SiteSuggestion[]; warnings: string[]; busy: boolean; dirty: boolean;
   label: (field: string, value: string | string[]) => string;
   fieldLabels: Record<string, string>;
   onDecide: (suggestion: SiteSuggestion, accept: boolean) => void;
+  onAcceptAll: () => void;
 }) {
   if (!suggestions.length && !warnings.length) return null;
   return (
     <section className="card site-suggestions">
-      <h2>Проверьте найденные данные</h2>
-      <p className="hint">Это предложения модели по тексту вашего сайта. Они не попадут в профиль без вашего подтверждения.</p>
-      {dirty ? <p className="hint">Сначала сохраните или отмените изменения профиля — тогда кнопки станут доступны.</p> : null}
+      <div className="site-suggestions-heading">
+        <div>
+          <p className="eyebrow">Результаты изучения сайта</p>
+          <h2>Проверьте найденные данные{suggestions.length ? ` · ${suggestions.length}` : ""}</h2>
+          <p className="hint">Нейросеть предлагает значения только для пустых полей. Каждый фрагмент подкреплён цитатой и ссылкой на страницу — подтвердите его после проверки.</p>
+        </div>
+        {suggestions.length > 1 ? (
+          <button type="button" className="btn btn-primary small" onClick={onAcceptAll} disabled={busy || dirty}>
+            {busy ? "Применяем…" : `Принять все ${suggestions.length}`}
+          </button>
+        ) : null}
+      </div>
+      {dirty ? <p className="site-warning">Сохраните ручные изменения перед подтверждением сведений с сайта.</p> : null}
       {warnings.map((warning, index) => <p className="site-warning" key={`${index}-${warning}`}>{warning}</p>)}
       {suggestions.map((suggestion) => (
         <article className="site-suggestion" key={`${suggestion.field_name}:${suggestion.source_url}`}>
@@ -385,7 +396,7 @@ export function SuggestionsPanel({ suggestions, warnings, busy, dirty, label, fi
           <blockquote>{suggestion.evidence}</blockquote>
           <p className="hint small">
             <a href={suggestion.source_url} target="_blank" rel="noreferrer">{suggestion.source_title || "Страница-источник"}</a>
-            {` · оценка модели: ${suggestion.confidence >= 0.8 ? "высокая" : "средняя"} (не гарантия точности)`}
+            {` · уверенность модели: ${suggestion.confidence >= 0.8 ? "высокая" : "средняя"} (проверьте самостоятельно)`}
           </p>
           <div className="suggestion-actions">
             <button type="button" className="btn btn-primary small" onClick={() => onDecide(suggestion, true)} disabled={busy || dirty}>Подтвердить</button>
