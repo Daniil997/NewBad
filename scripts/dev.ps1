@@ -46,10 +46,28 @@ if (-not (Test-Path (Join-Path $UiDir "node_modules"))) {
     try { npm install } finally { Pop-Location }
 }
 
+# Run the API in its own visible PowerShell window. Keeping that window open
+# makes Python import/startup errors visible instead of only showing Vite's
+# ECONNREFUSED proxy error in the UI console.
+$PowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+$RootForCommand = $Root.Replace("'", "''")
+$PythonForCommand = $Python.Replace("'", "''")
+$ApiCommand = @'
+Set-Location -LiteralPath '{0}'
+$Host.UI.RawUI.WindowTitle = 'NewBad API logs'
+& '{1}' -u -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "NewBad API завершился с ошибкой (код $LASTEXITCODE)." -ForegroundColor Red
+}
+'@
+$ApiCommand = $ApiCommand.Replace("{0}", $RootForCommand).Replace("{1}", $PythonForCommand)
+$EncodedApiCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($ApiCommand))
 $Api = Start-Process `
-    -FilePath $Python `
-    -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000" `
+    -FilePath $PowerShell `
+    -ArgumentList @("-NoExit", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $EncodedApiCommand) `
     -WorkingDirectory $Root `
+    -WindowStyle Normal `
     -PassThru
 
 Write-Host "API:  http://127.0.0.1:8000/docs"
