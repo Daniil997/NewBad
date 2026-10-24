@@ -57,7 +57,66 @@ def extract_fact(news: NewsItem) -> str | None:
             {"evidence": packet},
         ),
         token_limit("fact"),
-        task="news_card", space="demo",
+        import json
+import logging
+import re
+import time
+from contextvars import ContextVar
+
+import yaml
+
+from app.agent.failure import last_failure, record_failure, reset_failure
+from app.agent.loop_context import AgentContext
+from app.corpus.search import NewsItem
+from app.db import ROOT
+from app.llm.client import LLMError, parse_json
+from app.llm.router import Route, complete_tier, token_limit
+from app.user_store import developer_settings
+
+logger = logging.getLogger(__name__)
+
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
+_FACT = "confirmed_fact"
+_BANK = "bank_position"
+_INFERENCE = "model_inference"
+_COPY_FIELDS = ("why", "risk", "opportunity", "next_step", "question")
+_ANSWER_MODE: ContextVar[str] = ContextVar("answer_mode", default="mock")
+
+# Разбор новости: первый ответ плюс не более двух исправлений.
+_REPORT_RETRIES = 2
+# Пять смысловых полей не помещаются в стандартный лимит короткого ответа.
+_REPORT_MIN_TOKENS = 900
+_PLACEHOLDER = re.compile(
+    r"(?:данн\w*|информаци\w*|сведени\w*)\W+(?:\w+\W+){0,6}?"
+    r"(?:отсутству\w+|недостаточн\w+|не\s+(?:указан\w*|найден\w*|выявлен\w*|обнаружен\w*|представлен\w*))"
+    r"|^\W*(?:нет|отсутству\w+|не\s+(?:выявлен\w*|обнаружен\w*|определен\w*|найден\w*))\b"
+    r"|недостаточно\s+(?:данн|информац)"
+)
+_INTEREST_CHANNELS = (
+    ("credit_interest", "стоимость кредитов и заёмного финансирования"),
+    ("deposit_interest", "доходность размещения свободных средств"),
+    ("currency_interest", "валютные операции и курсы"),
+    ("export_import_interest", "экспортные и импортные расчёты"),
+    ("leasing_interest", "условия лизинга"),
+    ("guarantees_interest", "банковские гарантии"),
+    ("factoring_interest", "факторинг и оборотный капитал"),
+    ("settlements_interest", "расчёты и платежи"),
+)
+
+
+def extract_fact(news: NewsItem) -> str | None:
+    packet = [_news_evidence(news)]
+    payload, _route, _tokens = _ask(
+        _messages(
+            (
+                "Извлеки один короткий факт. Верни JSON с полями text, layer и evidence_ids. "
+                "layer только confirmed_fact. evidence_ids — только id из evidence. "
+                "Не добавляй числа, которых нет в text доказательства, и не указывай другие источники."
+            ),
+            {"evidence": packet},
+        ),
+        token_limit("fact"),
+        task="news_card_fact", space="demo",
     )
     claim = None if payload is None else _claim(payload, _index(packet), _FACT)
     return None if claim is None else claim["text"]
@@ -90,7 +149,7 @@ def request_copy(ctx: AgentContext) -> dict | None:
             {"evidence": packet, "issues": ctx.issues},
         ),
         token_limit("copy"),
-        task="news_card", space="demo",
+        task="news_card_copy", space="demo",
     )
     if payload is None or any(key not in payload for key in ("fact", "bank", "inference")):
         return None
