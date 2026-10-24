@@ -646,7 +646,7 @@ function Chat({
         {messages.map((item, index) => (
           <li key={`${item.role}-${index}`} className={item.role}>
             <span className="who">{item.role === "user" ? "Вы" : "Ответ"}</span>
-            {item.text}
+            {item.role === "service" ? <AnswerText text={item.text} /> : <p>{item.text}</p>}
           </li>
         ))}
         {asking ? (
@@ -658,4 +658,96 @@ function Chat({
       </ul>
     </div>
   );
+}
+
+
+type AnswerBlock =
+  | { kind: "heading"; level: number; text: string }
+  | { kind: "paragraph"; text: string }
+  | { kind: "list"; ordered: boolean; items: string[] };
+
+function AnswerText({ text }: { text: string }) {
+  const blocks: AnswerBlock[] = [];
+  let paragraph: string[] = [];
+  let listItems: string[] = [];
+  let listOrdered: boolean | null = null;
+
+  const flushParagraph = () => {
+    const value = paragraph.join(" ").trim();
+    if (value) blocks.push({ kind: "paragraph", text: value });
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (listItems.length && listOrdered !== null) {
+      blocks.push({ kind: "list", ordered: listOrdered, items: listItems });
+    }
+    listItems = [];
+    listOrdered = null;
+  };
+
+  for (const rawLine of text.replace(/\r/g, "").split("\n")) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      blocks.push({
+        kind: "heading",
+        level: Math.min(heading[1].length, 4),
+        text: heading[2].replace(/\s+#+$/, ""),
+      });
+      continue;
+    }
+    const ordered = line.match(/^\d+[.)]\s+(.+)$/);
+    const unordered = line.match(/^[-*+]\s+(.+)$/);
+    if (ordered || unordered) {
+      flushParagraph();
+      const isOrdered = Boolean(ordered);
+      if (listOrdered !== null && listOrdered !== isOrdered) flushList();
+      listOrdered = isOrdered;
+      listItems.push((ordered ?? unordered)![1]);
+      continue;
+    }
+    flushList();
+    paragraph.push(line);
+  }
+  flushParagraph();
+  flushList();
+
+  return (
+    <div className="answer-content">
+      {blocks.map((block, index) => {
+        if (block.kind === "heading") {
+          const Tag = `h${block.level}` as "h1" | "h2" | "h3" | "h4";
+          return <Tag key={index}>{inlineMarkdown(block.text)}</Tag>;
+        }
+        if (block.kind === "list") {
+          const List = block.ordered ? "ol" : "ul";
+          return (
+            <List key={index}>
+              {block.items.map((item, itemIndex) => <li key={itemIndex}>{inlineMarkdown(item)}</li>)}
+            </List>
+          );
+        }
+        return <p key={index}>{inlineMarkdown(block.text)}</p>;
+      })}
+    </div>
+  );
+}
+
+function inlineMarkdown(text: string) {
+  return text.split(/(\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)/g).map((part, index) => {
+    if ((part.startsWith("**") && part.endsWith("**")) || (part.startsWith("__") && part.endsWith("__"))) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    if ((part.startsWith("*") && part.endsWith("*")) || (part.startsWith("_") && part.endsWith("_"))) {
+      return <em key={index}>{part.slice(1, -1)}</em>;
+    }
+    return part;
+  });
 }
