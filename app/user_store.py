@@ -643,6 +643,35 @@ def pending_profile_suggestions(user_id: str) -> list[dict]:
     return [_suggestion_dict(row) for row in rows]
 
 
+def accepted_profile_sources(user_id: str) -> list[dict]:
+    """Show where current site-filled values originated; hide stale manual overrides."""
+    with connect_app() as connection:
+        row = connection.execute(
+            "SELECT id, profile_json FROM business_profiles WHERE owner_id = ?", (user_id,),
+        ).fetchone()
+        if row is None:
+            return []
+        try:
+            profile = json.loads(row["profile_json"])
+        except (TypeError, json.JSONDecodeError):
+            return []
+        rows = connection.execute(
+            """
+            SELECT field_name, value_json, source_url, source_title, extracted_at, confidence
+            FROM profile_field_sources
+            WHERE profile_id = ? AND review_status = 'accepted'
+            ORDER BY field_name, extracted_at DESC
+            """,
+            (row["id"],),
+        ).fetchall()
+    result = []
+    for source in rows:
+        record = _suggestion_dict(source)
+        if profile.get(record["field_name"]) == record["value"]:
+            result.append(record)
+    return result
+
+
 def decide_profile_suggestion(user_id: str, field_name: str, source_url: str, *, accept: bool) -> str:
     allowed_fields = {
         "company_name", "country", "region", "city", "description", "industry",
