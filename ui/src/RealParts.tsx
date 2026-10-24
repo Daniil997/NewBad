@@ -408,6 +408,39 @@ export function SuggestionsPanel({ suggestions, warnings, busy, dirty, label, fi
   );
 }
 
+export function ProfileSourcesPanel({ sources, profile, fieldLabels, label }: {
+  sources: SiteSuggestion[]; profile: BusinessProfile; fieldLabels: Record<string, string>;
+  label: (field: string, value: string | string[]) => string;
+}) {
+  // If an accepted value was edited manually, its original source no longer
+  // proves the current value and should not appear as attribution.
+  const current = sources.filter((source) => (
+    JSON.stringify((profile as unknown as Record<string, unknown>)[source.field_name])
+    === JSON.stringify(source.value)
+  ));
+  if (!current.length) return null;
+  return (
+    <section className="card site-provenance">
+      <details>
+        <summary>Подтвержденные данные с сайта · {current.length}</summary>
+        <p className="hint small">Эти значения были ранее приняты вами. Источники показываются только пока значение поля совпадает с подтверждённым.</p>
+        <ul className="site-provenance-list">
+          {current.map((source) => (
+            <li key={source.field_name + source.source_url}>
+              <strong>{fieldLabels[source.field_name] ?? source.field_name}</strong>
+              <span>{label(source.field_name, source.value)}</span>
+              <small><a href={source.source_url} target="_blank" rel="noreferrer">
+                {source.source_title || "Открыть источник"}
+              </a> · {formatDateTime(source.extracted_at)}</small>
+              <blockquote>{source.evidence}</blockquote>
+            </li>
+          ))}
+        </ul>
+      </details>
+    </section>
+  );
+}
+
 /* ───────────── Профиль ───────────── */
 
 type InterestKey =
