@@ -20,7 +20,8 @@ MAX_PAGE_TEXT = 12_000
 MAX_CRAWL_SECONDS = 35
 MAX_REDIRECTS = 3
 ALLOWED_CONTENT_TYPES = {"text/html", "application/xhtml+xml"}
-HIDDEN_TAGS = {"script", "style", "noscript", "svg", "template", "iframe", "object", "form"}
+HIDDEN_TAGS = {"script", "style", "noscript", "svg", "template", "iframe", "object", "form", "nav", "footer", "header", "aside", "button", "select"}
+BLOCK_TAGS = {"p", "div", "section", "article", "main", "li", "br", "h1", "h2", "h3", "h4", "tr", "td", "dt", "dd"}
 
 
 class SiteFetchError(ValueError):
@@ -69,6 +70,8 @@ class _VisibleTextParser(HTMLParser):
             href = dict(attrs).get("href")
             if href:
                 self.links.append(href.strip())
+        if tag in BLOCK_TAGS and not self._hidden:
+            self._text.append(" ")
 
     def handle_endtag(self, tag: str) -> None:
         tag = tag.lower()
@@ -76,11 +79,13 @@ class _VisibleTextParser(HTMLParser):
             self._in_title = False
         if tag in HIDDEN_TAGS and self._hidden:
             self._hidden -= 1
+        if tag in BLOCK_TAGS and not self._hidden:
+            self._text.append(" ")
 
     def handle_data(self, data: str) -> None:
         if self._in_title:
             self._title.append(data)
-        if not self._hidden and data.strip():
+        if not self._hidden and not self._in_title and data.strip():
             self._text.append(data.strip())
 
     @property
@@ -156,18 +161,39 @@ def crawl_site(start_url: str) -> CrawlResult:
             pages.append(SitePage(url=page_url, title=parser.title, text=parser.text))
         if depth >= MAX_DEPTH:
             continue
-        for href in parser.links:
+        # Give scarce crawl slots to public company facts: about, products,
+        # services and locations before news, banners, pagers and catalog filters.
+        discovered = {
+            target for href in parser.links
+            if (target := _safe_same_host_link(page_url, href, host))
+            and target not in visited
+        }
+        for target in sorted(discovered, key=lambda link: (_profile_link_priority(link), link)):
             if len(queue) + len(visited) >= MAX_PAGES * 8:
                 break
-            target = _safe_same_host_link(page_url, href, host)
-            if target and target not in visited:
-                queue.append((target, depth + 1))
+            queue.append((target, depth + 1))
 
     if time.monotonic() >= deadline:
         warnings.append("Истекло время, отведённое на обход сайта.")
     if not pages and not warnings:
         warnings.append("На сайте не найдено доступного текстового содержимого.")
     return CrawlResult(pages=pages, warnings=_dedupe(warnings), opened_url=opened_url)
+
+
+def _profile_link_priority(url: str) -> int:
+    """Prioritize useful public pages without granting more crawl permissions."""
+    path = urlsplit(url).path.lower().rstrip("/")
+    if any(term in path for term in ("/about", "/company", "/o-kompanii", "/o-nas", "/about-us", "/о-компании")):
+        return 0
+    if any(term in path for term in ("/services", "/products", "/catalog", "/production", "/uslugi", "/produkci", "/услуги", "/продукц")):
+        return 1
+    if any(term in path for term in ("/contacts", "/contact", "/offices", "/branches", "/контакты")):
+        return 2
+    if any(term in path for term in ("/partners", "/projects", "/clients", "/markets", "/география")):
+        return 3
+    if any(term in path for term in ("/news", "/blog", "/press", "/article", "/events", "/legal", "/privacy", "/login", "/basket")):
+        return 9
+    return 5
 
 
 def _load_robots(start_url: str, host: str, deadline: float) -> tuple[RobotFileParser, str]:
