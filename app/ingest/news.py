@@ -28,7 +28,7 @@ _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _EXCERPT = 600
 _MAX_ARTICLE_TEXT = 20000
 _MAX_ARTICLE_BYTES = 2 * 1024 * 1024
-_MAX_ARTICLE_FETCHES = 8
+_MAX_ARTICLE_FETCHES = 30
 _MIN_TEXT = 40
 _MIN_ARTICLE_TEXT = 200
 _SIMILAR = 0.8
@@ -121,7 +121,11 @@ def import_news(
     article_fetches = 0
     for raw in raw_items:
         article_fetcher = None
-        if origin.article_mode == "html" and article_fetches < _MAX_ARTICLE_FETCHES:
+        if (
+            origin.article_mode == "html"
+            and article_fetches < _MAX_ARTICLE_FETCHES
+            and _url(_child_local(raw, "link")) is not None
+        ):
             article_fetcher = fetch_article or (lambda url: _fetch_article(url, origin, origin.timeout_s))
             article_fetches += 1
         item, reason = _normalize(raw, origin, loaded_at, fetch_article=article_fetcher)
@@ -241,11 +245,19 @@ def import_news_catalog(output: Path, *, max_age_days: int = 3) -> CatalogImport
             # Store duplicates too: the same article may now have a longer, better-extracted body.
             store_imported_news(source.id, [item.model_dump() for item in batch.items])
             known.extend(new_items)
+            rejection_reasons: dict[str, int] = {}
+            for rejected_item in batch.rejected:
+                rejection_reasons[rejected_item.reason] = rejection_reasons.get(rejected_item.reason, 0) + 1
+            rejected_examples = [
+                {"title": item.title or "", "url": item.url or "", "reason": item.reason}
+                for item in batch.rejected[:5]
+            ]
             results.append({
                 "source_id": source.id, "source": source.name, "status": batch.status,
                 "imported": sum(item.status == "imported" for item in batch.items),
                 "duplicates": sum(item.status == "duplicate" for item in batch.items),
-                "rejected": len(batch.rejected), "error": "",
+                "rejected": len(batch.rejected), "rejection_reasons": rejection_reasons,
+                "rejected_examples": rejected_examples, "error": "",
             })
         except NewsIngestError as error:
             results.append({
