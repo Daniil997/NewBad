@@ -334,3 +334,38 @@
 @media (max-width: 850px) {
   .real .real-report .report-cols { grid-template-columns: 1fr; }
 }
+
+/* Site-based profile assistant: review is explicit, never silent. */
+.real .progress-card h2 { font-size: 1.25rem; line-height: 1.35; margin: .2rem 0 1rem; }
+.real .profile-shortcuts { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .85rem; }
+.real .profile-shortcuts a {
+  display: inline-flex; border: 1px solid #e5dfd3; border-radius: 999px;
+  padding: .4rem .75rem; color: #3f4244; font-weight: 650; font-size: .82rem;
+  text-decoration: none; background: #faf9f6;
+}
+.real .profile-shortcuts a:hover, .real .profile-shortcuts a:focus-visible {
+  border-color: #c52f26; background: #fff4f1; color: #9a211d;
+}
+.real #profile-about, .real #profile-activities, .real #profile-preferences { scroll-margin-top: 1.2rem; }
+.real .site-box { border-left-width: 4px; padding: 1rem; background: #f7f9fc; border-left-color: #5478b8; }
+.real .site-box > strong { font-size: 1.05rem; }
+.real .site-suggestions { border: 1px solid #e9e5dc; }
+.real .site-suggestions-heading, .real .site-scan-result-heading {
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start;
+  gap: .75rem 1rem;
+}
+.real .site-suggestions-heading > div { flex: 1 1 19rem; }
+.real .site-suggestions-heading h2, .real .site-scan-result h2 { margin: .2rem 0 .5rem; font-size: 1.2rem; }
+.real .site-suggestions-heading .hint { max-width: 60ch; line-height: 1.5; }
+.real .site-suggestions-heading button { align-self: center; }
+.real .site-suggestion { background: #fbfaf7; border: 1px solid #e7e2d9; padding: 1rem; }
+.real .site-suggestion h3 { font-size: 1rem; }
+.real .site-suggestion blockquote { color: #30415f; background: #f0f5fb; border-color: #7b9dd0; line-height: 1.5; }
+.real .site-suggestion .hint a, .real .site-scanned-pages a { color: #b82c24; overflow-wrap: anywhere; }
+.real .site-suggestion .suggestion-actions { margin-top: .75rem; }
+.real .site-scan-result { margin-bottom: .85rem; background: #f6f8fc; border: 1px solid #dde5f1; }
+.real .site-scan-result-heading p { max-width: 68ch; }
+.real .site-scan-result details { margin-top: .5rem; }
+.real .site-scan-result summary { cursor: pointer; font-weight: 600; }
+.real .site-scanned-pages { padding-left: 1.3rem; line-height: 1.55; }
+.real .site-scanned-pages li { margin: .3rem 0; }
