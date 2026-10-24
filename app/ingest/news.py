@@ -28,7 +28,7 @@ _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _EXCERPT = 600
 _MAX_ARTICLE_TEXT = 20000
 _MAX_ARTICLE_BYTES = 2 * 1024 * 1024
-_MAX_ARTICLE_FETCHES = 8
+_MAX_ARTICLE_FETCHES = 30
 _MIN_TEXT = 40
 _MIN_ARTICLE_TEXT = 200
 _SIMILAR = 0.8
@@ -121,7 +121,11 @@ def import_news(
     article_fetches = 0
     for raw in raw_items:
         article_fetcher = None
-        if origin.article_mode == "html" and article_fetches < _MAX_ARTICLE_FETCHES:
+        if (
+            origin.article_mode == "html"
+            and article_fetches < _MAX_ARTICLE_FETCHES
+            and _url(_child_local(raw, "link")) is not None
+        ):
             article_fetcher = fetch_article or (lambda url: _fetch_article(url, origin, origin.timeout_s))
             article_fetches += 1
         item, reason = _normalize(raw, origin, loaded_at, fetch_article=article_fetcher)
@@ -241,11 +245,19 @@ def import_news_catalog(output: Path, *, max_age_days: int = 3) -> CatalogImport
             # Store duplicates too: the same article may now have a longer, better-extracted body.
             store_imported_news(source.id, [item.model_dump() for item in batch.items])
             known.extend(new_items)
+            rejection_reasons: dict[str, int] = {}
+            for rejected_item in batch.rejected:
+                rejection_reasons[rejected_item.reason] = rejection_reasons.get(rejected_item.reason, 0) + 1
+            rejected_examples = [
+                {"title": item.title or "", "url": item.url or "", "reason": item.reason}
+                for item in batch.rejected[:5]
+            ]
             results.append({
                 "source_id": source.id, "source": source.name, "status": batch.status,
                 "imported": sum(item.status == "imported" for item in batch.items),
                 "duplicates": sum(item.status == "duplicate" for item in batch.items),
-                "rejected": len(batch.rejected), "error": "",
+                "rejected": len(batch.rejected), "rejection_reasons": rejection_reasons,
+                "rejected_examples": rejected_examples, "error": "",
             })
         except NewsIngestError as error:
             results.append({
@@ -530,6 +542,9 @@ class _ArticleTextParser(HTMLParser):
         self.stack: list[tuple[str, bool, int | None]] = []
         self.active: list[int] = []
         self.candidates: list[tuple[int, list[str]]] = []
+        self.anchor_depth = 0
+        self.anchor_count = 0
+        self.anchor_chars = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attrs_map = {key.casefold(): (value or "").casefold() for key, value in attrs}
@@ -548,6 +563,9 @@ class _ArticleTextParser(HTMLParser):
                 self.candidates.append((score, []))
                 self.active.append(candidate_id)
         self.stack.append((tag, skipped, candidate_id))
+        if not skipped and tag == "a":
+            self.anchor_depth += 1
+            self.anchor_count += 1
         if not skipped and tag in self._BLOCK:
             self._append("\\n")
 
@@ -558,6 +576,8 @@ class _ArticleTextParser(HTMLParser):
         popped = self.stack[match:]
         del self.stack[match:]
         for _tag, _skipped, candidate_id in reversed(popped):
+            if _tag == "a":
+                self.anchor_depth = max(0, self.anchor_depth - 1)
             if candidate_id is not None and candidate_id in self.active:
                 self.active.remove(candidate_id)
         if tag in self._BLOCK:
@@ -570,6 +590,8 @@ class _ArticleTextParser(HTMLParser):
         if not cleaned:
             return
         self.body.append(cleaned)
+        if self.anchor_depth:
+            self.anchor_chars += len(cleaned)
         for candidate_id in self.active:
             self.candidates[candidate_id][1].append(cleaned)
 
@@ -580,9 +602,25 @@ class _ArticleTextParser(HTMLParser):
                 self.candidates[candidate_id][1].append(value)
 
     def text(self) -> str:
-        body = _SPACE.sub(" ", " ".join(self.body)).strip()
+        body = _strip_page_boilerplate(_SPACE.sub(" ", " ".join(self.body)).strip())
+        folded = body.casefold()
+        # CBR RSS sometimes links to a section/index page rather than an individual
+        # publication. Such pages contain many linked document titles and page chrome;
+        # importing the whole listing as the article body pollutes search and AI analysis.
+        page_chrome = (
+            "страница была полезной?" in folded
+            and ("последнее обновление страницы" in folded or "публичное обсуждение" in folded)
+        )
+        link_heavy_listing = (
+            self.anchor_count >= 10
+            and self.anchor_chars >= 400
+            and len(body) >= 700
+            and self.anchor_chars / max(len(body), 1) >= 0.35
+        )
+        if page_chrome or link_heavy_listing:
+            return ""
         eligible = [
-            (score, _SPACE.sub(" ", " ".join(parts)).strip())
+            (score, _strip_page_boilerplate(_SPACE.sub(" ", " ".join(parts)).strip()))
             for score, parts in self.candidates
         ]
         eligible = [(score, text) for score, text in eligible if len(text) >= _MIN_ARTICLE_TEXT]
@@ -593,6 +631,21 @@ class _ArticleTextParser(HTMLParser):
                 if len(candidate_text) >= len(body) * 0.25:
                     return candidate_text
         return body
+
+
+def _strip_page_boilerplate(value: str) -> str:
+    """Remove recurring CBR page controls and metadata that are not article content."""
+    text = value
+    patterns = (
+        r"(?i)\bстраница была полезной\\s*\\?",
+        r"(?i)\bответственное структурное подразделение\\s*:\\s*.*$",
+        r"(?i)\bпоследнее обновление страницы\\s*:?\\s*.*$",
+        r"(?i)\bверсия для печати\\b",
+        r"(?i)\bподелиться\\b",
+    )
+    for pattern in patterns:
+        text = re.sub(pattern, " ", text)
+    return _SPACE.sub(" ", text).strip(" \\t\\r\\n|·—-:")
 
 
 def _html_to_text(value: str) -> str:

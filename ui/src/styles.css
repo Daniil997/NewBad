@@ -640,6 +640,23 @@ dd {
   margin-bottom: 1rem;
 }
 
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.settings-actions button.secondary {
+  background: #fff;
+  color: #8b1e18;
+  border: 1px solid #d8aaa6;
+}
+
+.settings-actions button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
 .settings-form label {
   display: grid;
   gap: 0.3rem;
@@ -879,3 +896,91 @@ details.paste {
     font-size: 0.85rem;
   }
 }
+
+
+/* Structured Markdown in assistant chat replies */
+.messages .answer-content {
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.messages .answer-content > :first-child {
+  margin-top: 0;
+}
+
+.messages .answer-content > :last-child {
+  margin-bottom: 0;
+}
+
+.messages .answer-content h1,
+.messages .answer-content h2,
+.messages .answer-content h3,
+.messages .answer-content h4 {
+  margin: 0.85rem 0 0.35rem;
+  line-height: 1.3;
+  font-size: 1rem;
+}
+
+.messages .answer-content h1 {
+  font-size: 1.1rem;
+}
+
+.messages .answer-content p {
+  white-space: normal;
+  margin: 0.45rem 0;
+}
+
+.messages .answer-content ul,
+.messages .answer-content ol {
+  margin: 0.4rem 0 0.65rem;
+  padding-left: 1.5rem;
+}
+
+.messages .answer-content li {
+  margin: 0.25rem 0;
+  padding: 0;
+  border-radius: 0;
+}
+
+.messages .answer-content li > p {
+  margin: 0.2rem 0;
+}
+
+
+/* Markdown formatting in real-mode assistant chat */
+.chat-msg .markdown-text {
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.chat-msg .markdown-text > :first-child { margin-top: 0; }
+.chat-msg .markdown-text > :last-child { margin-bottom: 0; }
+.chat-msg .markdown-text h1,
+.chat-msg .markdown-text h2,
+.chat-msg .markdown-text h3,
+.chat-msg .markdown-text h4 {
+  margin: .8rem 0 .35rem;
+  line-height: 1.3;
+}
+.chat-msg .markdown-text h1 { font-size: 1.15rem; }
+.chat-msg .markdown-text h2 { font-size: 1.08rem; }
+.chat-msg .markdown-text h3,
+.chat-msg .markdown-text h4 { font-size: 1rem; }
+.chat-msg .markdown-text p { margin: .45rem 0; white-space: normal; }
+.chat-msg .markdown-text ul,
+.chat-msg .markdown-text ol { margin: .4rem 0 .7rem; padding-left: 1.5rem; }
+.chat-msg .markdown-text li { margin: .25rem 0; }
+.chat-msg .markdown-text strong { font-weight: 700; }
+.chat-msg .markdown-text blockquote {
+  margin: .6rem 0;
+  padding: .35rem .8rem;
+  border-left: 3px solid var(--accent, #b51f2b);
+  background: var(--surface-muted, #f5f7fa);
+}
+.chat-msg .markdown-text code {
+  padding: .1rem .3rem;
+  border-radius: 4px;
+  background: var(--surface-muted, #f5f7fa);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.chat-msg .markdown-text a { overflow-wrap: anywhere; }

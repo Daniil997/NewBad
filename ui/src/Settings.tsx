@@ -18,7 +18,7 @@ type NewsStatus = {
   sources: { id: string; name: string; url: string }[];
   latest: null | {
     status: string; finished_at: string;
-    sources: { source: string; status: string; imported: number; duplicates: number; rejected: number; error: string }[];
+    sources: { source: string; status: string; imported: number; duplicates: number; rejected: number; error: string; rejection_reasons?: Record<string, number>; rejected_examples?: { title: string; url: string; reason: string }[] }[];
   };
   stored_count: number;
 };
@@ -67,6 +67,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
   const [saved, setSaved] = useState("");
   const [busy, setBusy] = useState(false);
   const [collecting, setCollecting] = useState(false);
+  const [clearingNews, setClearingNews] = useState(false);
   const [collectingMarket, setCollectingMarket] = useState(false);
 
   async function refreshNewsStatus() {
@@ -199,6 +200,27 @@ export function Settings({ onBack }: { onBack: () => void }) {
     }
   }
 
+  async function clearNewsDatabase() {
+    const confirmed = window.confirm(
+      "Удалить все собранные новости из базы? Профили компаний и рыночные данные останутся. После очистки нажмите «Собрать сейчас», чтобы загрузить новости заново."
+    );
+    if (!confirmed) return;
+    setClearingNews(true);
+    setError("");
+    setSaved("");
+    try {
+      const response = await fetch("/api/settings/news/clear", { method: "POST" });
+      const payload = await response.json().catch(() => null) as { status?: string; removed?: number; detail?: string } | null;
+      if (!response.ok || !payload) throw new Error(payload?.detail || "Не удалось очистить базу новостей");
+      await refreshNewsStatus();
+      setSaved(`База новостей очищена: удалено записей — ${payload.removed ?? 0}. Теперь можно нажать «Собрать сейчас» для проверки парсинга.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Не удалось очистить базу новостей");
+    } finally {
+      setClearingNews(false);
+    }
+  }
+
   return (
     <main className="page">
       <button className="linkish" type="button" onClick={onBack}>На главную</button>
@@ -263,10 +285,25 @@ export function Settings({ onBack }: { onBack: () => void }) {
         {newsStatus ? <>
           <p>Сохранено новостей: {newsStatus.stored_count}</p>
           <ul>{newsStatus.sources.map((source) => <li key={source.id}><a href={source.url} target="_blank" rel="noreferrer">{source.name}</a></li>)}</ul>
-          <button type="button" onClick={() => void collectNews()} disabled={collecting}>{collecting ? "Собираем…" : "Собрать сейчас"}</button>
+          <div className="settings-actions">
+            <button type="button" onClick={() => void collectNews()} disabled={collecting || clearingNews}>{collecting ? "Собираем…" : "Собрать сейчас"}</button>
+            <button className="secondary" type="button" onClick={() => void clearNewsDatabase()} disabled={collecting || clearingNews}>{clearingNews ? "Очищаем…" : "Очистить базу новостей"}</button>
+          </div>
+          <p className="hint">Чтобы проверить актуальный парсер на чистой базе: очистите новости, затем нажмите «Собрать сейчас». Сбор загружает текст статей из официальных RSS-источников и их страниц.</p>
           {newsStatus.latest ? <>
             <p>Последний запуск: {new Date(newsStatus.latest.finished_at).toLocaleString("ru-RU")} · {newsStatus.latest.status}</p>
-            <ul>{newsStatus.latest.sources.map((item) => <li key={item.source}>{item.source}: {item.status}; новых {item.imported}, дублей {item.duplicates}, отклонено {item.rejected}{item.error ? ` (ошибка: ${item.error})` : ""}</li>)}</ul>
+            <ul>{newsStatus.latest.sources.map((item) => <li key={item.source}>
+              <strong>{item.source}</strong>: {item.status}; новых {item.imported}, дублей {item.duplicates}, отклонено {item.rejected}{item.error ? ` (ошибка: ${item.error})` : ""}
+              {item.rejection_reasons && Object.keys(item.rejection_reasons).length ? <ul>
+                {Object.entries(item.rejection_reasons).sort((a, b) => b[1] - a[1]).map(([reason, count]) => <li key={reason}>{reason}: {count}</li>)}
+              </ul> : null}
+              {item.rejected_examples?.length ? <details>
+                <summary>Примеры отклонённых записей</summary>
+                <ul>{item.rejected_examples.map((example, index) => <li key={item.source + "-" + index}>
+                  {example.title || "Без заголовка"} — {example.reason}{example.url ? <> · <a href={example.url} target="_blank" rel="noreferrer">открыть</a></> : null}
+                </li>)}</ul>
+              </details> : null}
+            </li>)}</ul>
           </> : <p className="hint">Сбор ещё не запускался.</p>}
         </> : <button type="button" onClick={() => void refreshNewsStatus()}>Загрузить состояние</button>}
       </section>

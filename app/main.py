@@ -34,7 +34,7 @@ from app.corpus.search import (
 )
 from app.db import ROOT, connect, init_db, journal_is_empty, journal_tables
 from app.ingest.news import import_news_catalog, load_news_sources, migrate_legacy_imports
-from app.news_store import prune_stored_news, stored_news_count
+from app.news_store import clear_stored_news, prune_stored_news, stored_news_count
 from app.market_data import collect_market_data, load_market_config
 from app.market_store import latest_market_collection, market_history, market_snapshot, persist_profile_market_links, prune_market_data, record_market_collection, store_observations
 from app.personal_feed import (
@@ -1501,6 +1501,13 @@ def news_collection_status() -> dict:
 @app.post("/api/settings/news/collect")
 def collect_news_now() -> dict:
     return _collect_news()
+
+
+@app.post("/api/settings/news/clear")
+def clear_news_database() -> dict:
+    """Delete only collected news articles so the next collection can rebuild them."""
+    removed = clear_stored_news()
+    return {"status": "complete", "removed": removed, "stored_count": stored_news_count()}
 
 
 @app.get("/api/settings/market/status")
