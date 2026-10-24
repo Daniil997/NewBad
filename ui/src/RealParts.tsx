@@ -498,7 +498,9 @@ export function ProfileForm(props: ProfileFormProps) {
 
   return (
     <form className="profile-flow" onSubmit={onSubmit}>
-      <section className="card progress-card">
+      <section className="card progress-card" id="profile-overview">
+        <p className="eyebrow">Профиль бизнеса · реальный режим</p>
+        <h2>Заполните основу — новости станут персональнее</h2>
         <div className="progress-line">
           <strong>Заполнено {progress.done} из {progress.total}</strong>
           <span>{percent}%</span>
@@ -506,11 +508,16 @@ export function ProfileForm(props: ProfileFormProps) {
         <div className="progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: `${percent}%` }} /></div>
         <p className="hint small">
           {progress.missing.length ? `Ещё не указано: ${progress.missing.join(", ")}. ` : "Всё основное указано. "}
-          Чем точнее профиль, тем точнее подборка новостей. Пустые поля остаются «неизвестными» — ничего страшного. Не указывайте номера счетов и точные суммы.
+          Чем точнее профиль, тем точнее подборка новостей. Пустые поля остаются неизвестными — ничего страшного. Не указывайте номера счетов и точные суммы.
         </p>
+        <nav className="profile-shortcuts" aria-label="Разделы профиля">
+          <a href="#profile-about">1. О компании</a>
+          <a href="#profile-activities">2. Деятельность</a>
+          <a href="#profile-preferences">3. Интересы и риски</a>
+        </nav>
       </section>
 
-      <section className="card form-section">
+      <section className="card form-section" id="profile-about">
         <h2><span className="step">1</span> О компании</h2>
         <div className="form-grid">
           <Field label="Название компании или бренда" required>
@@ -529,20 +536,21 @@ export function ProfileForm(props: ProfileFormProps) {
         <label className="check"><input type="checkbox" checked={profile.description_skipped} onChange={(event) => onChange("description_skipped", event.target.checked)} /><span>Пока пропустить описание</span></label>
 
         <div className="site-box">
-          <strong>Заполнить по сайту</strong>
-          <p className="hint small">Мы прочитаем публичные страницы сайта и предложим значения полей. Сначала сохраните профиль с адресом сайта.</p>
+          <strong>Помощник по изучению сайта</strong>
+          <p className="hint small">Как работает: 1) сохраните адрес; 2) разрешите анализ публичных страниц; 3) просмотрите цитаты и ссылки; 4) подтвердите подходящие значения. Существующие поля не перезаписываются.</p>
           <label className="check">
             <input type="checkbox" checked={siteConsent} onChange={(event) => onConsent(event.target.checked)} />
             <span>Согласен отправить текст публичных страниц выбранной модели для анализа. При облачном маршруте он будет передан внешнему API; закрытые данные отправлять не следует.</span>
           </label>
           <button type="button" className="btn btn-ghost" onClick={onAnalyzeSite} disabled={!profile.website || !siteConsent || dirty || siteBusy}>
-            {siteBusy ? "Анализируем…" : "Подтянуть данные с сайта"}
+            {siteBusy ? "Изучаем страницы и проверяем сведения…" : "Изучить сайт и предложить заполнение"}
           </button>
           {dirty && profile.website ? <small>Сохраните изменения профиля перед запуском анализа.</small> : null}
+          {siteBusy ? <p className="hint small" role="status">Обходим доступные страницы, выбираем сведения и проверяем ответы нейросети. Изменений профиля до вашего подтверждения не будет.</p> : null}
         </div>
       </section>
 
-      <section className="card form-section">
+      <section className="card form-section" id="profile-activities">
         <h2><span className="step">2</span> Чем занимается компания</h2>
         <div className="form-grid">
           <Field label="Основная деятельность"><input className="input" maxLength={200} value={profile.industry} onChange={(event) => onChange("industry", event.target.value)} /></Field>
@@ -558,7 +566,7 @@ export function ProfileForm(props: ProfileFormProps) {
         <TagPicker legend="Отрасль (можно выбрать несколько)" tags={options.industry_tags} selected={profile.industry_tags} onToggle={(id, checked) => onToggleTag("industry_tags", id, checked)} />
       </section>
 
-      <section className="card form-section">
+      <section className="card form-section" id="profile-preferences">
         <h2><span className="step">3</span> Что вам важно</h2>
         <p className="hint">Отметьте, что актуально сейчас. От этого зависит, какие новости попадут в подборку «Для вас».</p>
         <div className="interest-list">
