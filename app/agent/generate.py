@@ -271,7 +271,7 @@ def analyze_profile_news(profile: dict, news: NewsItem) -> dict | None:
     evidence = [
         {"evidence_id": "company-profile", "title": "Профиль компании", "text": json.dumps(profile_fields, ensure_ascii=False)},
         {"evidence_id": news_key, "title": news.title,
-         "text": f"{news.title}. {news.excerpt}", "url": news.url, "published_at": news.published_at},
+         "text": f"{news.title}. {news.excerpt[:6000]}", "url": news.url, "published_at": news.published_at},
     ]
     allowed = _index(evidence)
     validate_numbers = developer_settings().get("validate_numeric_grounding", True)
