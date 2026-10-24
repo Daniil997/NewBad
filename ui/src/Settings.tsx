@@ -18,7 +18,7 @@ type NewsStatus = {
   sources: { id: string; name: string; url: string }[];
   latest: null | {
     status: string; finished_at: string;
-    sources: { source: string; status: string; imported: number; duplicates: number; rejected: number; error: string }[];
+    sources: { source: string; status: string; imported: number; duplicates: number; rejected: number; error: string; rejection_reasons?: Record<string, number>; rejected_examples?: { title: string; url: string; reason: string }[] }[];
   };
   stored_count: number;
 };
