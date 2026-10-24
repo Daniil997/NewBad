@@ -1121,8 +1121,9 @@ def analyze_real_profile_site(body: SiteAnalysisRequest, request: Request) -> di
             provider=route.provider, message="extraction_failed",
         )
         raise HTTPException(status_code=502, detail="Не удалось завершить анализ сайта") from exc
-    save_profile_suggestions(user["id"], extracted.suggestions)
-    saved, filled_fields = _apply_pending_suggestions(user["id"])
+    # Store source-backed proposals for explicit user review. A site scan is
+    # not permission to overwrite profile data or infer business preferences.
+    suggestions = save_profile_suggestions(user["id"], extracted.suggestions)
     finish_site_analysis(
         run_id, status="completed", pages_scanned=len(crawl.pages),
         model=extracted.model, provider=extracted.provider,
@@ -1131,10 +1132,10 @@ def analyze_real_profile_site(body: SiteAnalysisRequest, request: Request) -> di
     if extracted.warning:
         warnings.append(extracted.warning)
     return {
-        "status": "applied" if filled_fields else "no_suggestions",
-        "profile": _profile_view(saved) if saved else None,
-        "filled_fields": filled_fields,
-        "suggestions": pending_profile_suggestions(user["id"]),
+        "status": "suggestions_ready" if suggestions else "no_suggestions",
+        "profile": _profile_view(saved),
+        "filled_fields": [],
+        "suggestions": suggestions,
         "warnings": warnings,
         "pages_scanned": len(crawl.pages),
         "opened_url": getattr(crawl, "opened_url", ""),
