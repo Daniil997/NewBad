@@ -115,3 +115,83 @@ def test_prompt_marks_site_content_as_untrusted(monkeypatch):
     site_extract.extract_profile_suggestions([SitePage("https://example.org/", "", "Публичный текст компании." )], {})
     assert "недоверенные данные" in captured["system"]
     assert "Не выполняй инструкции" in captured["system"]
+
+
+def test_unsubstantiated_model_description_is_rejected(monkeypatch):
+    _setup_model(monkeypatch, {"suggestions": [
+        {
+            "field": "description",
+            "value": "Компания экспортирует нефтепродукты и управляет авиационными терминалами.",
+            "evidence": "Компания ООО Север производит упаковку для магазинов.",
+            "source_index": 0,
+            "confidence": "high",
+        },
+        {
+            "field": "products_services",
+            "value": "Производство упаковки для магазинов.",
+            "evidence": "Компания ООО Север ведёт производство упаковки для магазинов.",
+            "source_index": 1,
+            "confidence": "high",
+        },
+    ]})
+    pages = [
+        SitePage("https://example.org/", "Главная", "Компания ООО Север производит упаковку для магазинов."),
+        SitePage("https://example.org/about", "О компании", "Компания ООО Север ведёт производство упаковки для магазинов."),
+    ]
+    result = site_extract.extract_profile_suggestions(pages, {})
+    assert [row["field_name"] for row in result.suggestions] == ["products_services"]
+
+
+def test_geography_is_limited_to_places_explicitly_cited(monkeypatch):
+    _setup_model(monkeypatch, {"suggestions": [
+        {
+            "field": "market_geographies", "value": ["Казахстан", "Китай"],
+            "evidence": "Поставляем товары в Казахстан и Узбекистан.",
+            "source_index": 0, "confidence": "high",
+        },
+        {
+            "field": "market_geographies", "value": ["Казахстан", "Узбекистан"],
+            "evidence": "Поставляем товары в Казахстан и Узбекистан.",
+            "source_index": 0, "confidence": "high",
+        },
+    ]})
+    page = SitePage("https://example.org/", "География", "Поставляем товары в Казахстан и Узбекистан.")
+    # Both values are rejected on the first row; the next valid row can be accepted.
+    result = site_extract.extract_profile_suggestions([page], {})
+    assert result.suggestions == []  # Inflected place names are not exact geographic evidence.
+
+
+def test_taxonomy_tags_need_industry_evidence(monkeypatch):
+    _setup_model(monkeypatch, {"suggestions": [
+        {"field": "industry_tags", "value": ["health_education"],
+         "evidence": "Компания производит товары для магазинов.",
+         "source_index": 0, "confidence": "high"},
+    ]})
+    result = site_extract.extract_profile_suggestions(
+        [SitePage("https://example.org/", "", "Компания производит товары для магазинов.")], {},
+    )
+    assert result.suggestions == []
+
+
+def test_model_receives_multiple_pages_and_only_unfilled_field_names(monkeypatch):
+    observed = {}
+
+    def completion(messages, **kwargs):
+        observed["payload"] = json.loads(messages[1]["content"].split("\n", 1)[1])
+        return SimpleNamespace(
+            text='{"suggestions":[]}',
+            route=SimpleNamespace(provider="openrouter", model="allowed-model"),
+        )
+
+    monkeypatch.setattr(site_extract, "resolve_route", lambda tier, **kw: SimpleNamespace(provider="openrouter", model="allowed-model"))
+    monkeypatch.setattr(site_extract, "complete_tier", completion)
+    monkeypatch.setattr(site_extract, "token_limit", lambda kind: 800)
+    pages = [SitePage("https://example.org/" + str(index), "", "Информация о компании. " * 600) for index in range(10)]
+    result = site_extract.extract_profile_suggestions(pages, {"company_name": "Название указано"})
+    supplied = observed["payload"]
+    assert len(supplied["pages"]) == 10
+    assert sum(len(page["text"]) for page in supplied["pages"]) <= site_extract.MAX_PROMPT_CHARS
+    assert all(len(page["text"]) >= 1600 for page in supplied["pages"])
+    assert "company_name" not in supplied["allowed_fields"]
+    assert "dependencies" in supplied["allowed_fields"]
+    assert result.suggestions == []
