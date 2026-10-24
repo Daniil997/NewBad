@@ -33,17 +33,43 @@ Set-Location $Root
 Import-DotEnv (Join-Path $Root ".env")
 
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
-if (-not (Test-Path $Python)) {
+if (-not (Test-Path -LiteralPath $Python)) {
+    if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+        throw "Python не найден. Установите Python 3.11+ и добавьте его в PATH."
+    }
     Write-Host "Creating .venv"
     python -m venv (Join-Path $Root ".venv")
-    & $Python -m pip install -r (Join-Path $Root "requirements-dev.txt")
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Python)) {
+        throw "Не удалось создать виртуальное окружение Python."
+    }
 }
 
+& $Python -c "import sys; assert sys.version_info >= (3, 11), 'Python 3.11+ required'"
+if ($LASTEXITCODE -ne 0) { throw "Проекту необходим Python 3.11+." }
+
+# An existing virtual environment may be missing dependencies after git pull.
+& $Python -c "import fastapi, uvicorn, pydantic, httpx, yaml, duckdb, numpy, fitz, rank_bm25"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Installing missing Python dependencies"
+    & $Python -m pip install -r (Join-Path $Root "requirements-dev.txt")
+    if ($LASTEXITCODE -ne 0) { throw "Не удалось установить Python-зависимости." }
+}
+
+# Prevent starting the frontend against an API with a syntax error.
+& $Python -m compileall -q (Join-Path $Root "app") (Join-Path $Root "config")
+if ($LASTEXITCODE -ne 0) { throw "В Python-коде обнаружена синтаксическая ошибка. API не запущен." }
+
 $UiDir = Join-Path $Root "ui"
+if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+    throw "npm не найден. Установите Node.js LTS."
+}
 if (-not (Test-Path (Join-Path $UiDir "node_modules"))) {
     Write-Host "Installing UI dependencies"
     Push-Location $UiDir
-    try { npm install } finally { Pop-Location }
+    try {
+        npm ci
+        if ($LASTEXITCODE -ne 0) { throw "Не удалось установить UI-зависимости." }
+    } finally { Pop-Location }
 }
 
 # Run the API in its own visible PowerShell window. Keeping that window open
@@ -69,6 +95,24 @@ $Api = Start-Process `
     -WorkingDirectory $Root `
     -WindowStyle Normal `
     -PassThru
+
+# Launch Vite only after the API has answered its health endpoint.
+$ApiReady = $false
+Write-Host "Checking API health..."
+for ($attempt = 0; $attempt -lt 60; $attempt++) {
+    try {
+        $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/health" -TimeoutSec 2
+        if ($health.status -eq "ok") {
+            $ApiReady = $true
+            break
+        }
+    } catch { }
+    Start-Sleep -Milliseconds 500
+}
+if (-not $ApiReady) {
+    Write-Host "API не отвечает. Проверьте отдельное окно 'NewBad API logs'." -ForegroundColor Red
+    throw "API не прошёл проверку /api/health; интерфейс не запущен."
+}
 
 Write-Host "API:  http://127.0.0.1:8000/docs"
 Write-Host "UI:   http://127.0.0.1:5173"
