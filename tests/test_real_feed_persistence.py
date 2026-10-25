@@ -99,7 +99,7 @@ def test_profile_market_links_are_persisted_idempotently_without_guessing_equiti
 
     init_app_db()
     with connect_app() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 12
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
         assert connection.execute("SELECT COUNT(*) FROM profile_market_links").fetchone()[0] == 3
 
 

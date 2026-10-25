@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MarkdownText } from "./MarkdownText";
+import { BankRecommendation } from "./BankRecommendation";
 import {
   formatDateTime, formatPrice, relevanceInfo,
   type BusinessProfile, type ChatMessage, type MarketHistory,
@@ -120,6 +121,7 @@ export function NewsDetail({ item, reportBusy, chatBusy, onReport, onChat }: {
             <p className="report-foot">Разбор от {formatDateTime(report.created_at)} · <button type="button" className="btn-link" onClick={() => onReport(true)} disabled={reportBusy}>{reportBusy ? "Обновляем…" : "Пересчитать разбор"}</button></p>
         </> : null}
       </NewsAnalysis>
+      <BankRecommendation recommendation={item.bank_recommendation} />
       <div className="detail-actions">
         <button type="button" className="btn btn-ghost" onClick={onChat} disabled={chatBusy}>
           {chatBusy ? "Открываем чат…" : "Спросить об этой новости"}

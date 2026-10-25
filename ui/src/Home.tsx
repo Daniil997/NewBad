@@ -1,4 +1,5 @@
 import { ModeSwitch, type AppMode } from "./ModeSwitch";
+import "./home.css";
 
 export function Home({
   mode,
@@ -14,7 +15,7 @@ export function Home({
   onSettings: () => void;
 }) {
   return (
-    <div className="bank">
+    <div className="bank home-page">
       <header className="bank-bar">
         <div className="bank-brand">
           <strong>Альфа-Бизнес</strong>

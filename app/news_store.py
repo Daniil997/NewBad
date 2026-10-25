@@ -1,5 +1,6 @@
 """SQLite persistence for collected news; bundled demo fixtures remain JSON files."""
 
+import json
 from datetime import date, timedelta
 
 from app.news_topics import news_topic
@@ -16,6 +17,78 @@ def imported_news() -> list[dict]:
             "FROM news_articles ORDER BY published_at DESC, loaded_at DESC"
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def recommendation_profiles() -> list[dict]:
+    """Real company profiles available to the developer's editorial workspace."""
+    init_app_db()
+    with connect_app() as connection:
+        rows = connection.execute(
+            "SELECT p.id, p.profile_json, p.status, p.profile_version, u.login FROM business_profiles p "
+            "JOIN users u ON u.id = p.owner_id WHERE u.status = 'active' ORDER BY u.login, p.id"
+        ).fetchall()
+    profiles = []
+    for row in rows:
+        profile = json.loads(row["profile_json"])
+        profiles.append({"id": row["id"], "login": row["login"], "status": row["status"],
+                         "profile_version": row["profile_version"],
+                         **{key: str(profile.get(key) or "") for key in
+                            ("company_name", "industry", "region", "city", "description", "products_services")}})
+    return profiles
+
+
+def bank_recommendations(profile_id: str) -> dict[str, dict]:
+    """Only the selected company's editorial assessments, never another company's or legacy shared text."""
+    init_app_db()
+    with connect_app() as connection:
+        rows = connection.execute(
+            "SELECT news_id, text, page, updated_at FROM profile_bank_recommendations WHERE profile_id = ?",
+            (profile_id,),
+        ).fetchall()
+    return {row["news_id"]: {key: row[key] for key in ("text", "page", "updated_at")} for row in rows}
+
+
+def recommendation_news(profile_id: str) -> list[dict] | None:
+    init_app_db()
+    with connect_app() as connection:
+        if not connection.execute("SELECT id FROM business_profiles WHERE id = ?", (profile_id,)).fetchone():
+            return None
+        rows = connection.execute(
+            "SELECT n.id, n.title, n.source, n.url, n.published_at, n.event_title, "
+            "COALESCE(r.text, '') AS text, r.page, r.updated_at, "
+            "n.bank_recommendation AS legacy_text, n.bank_recommendation_page AS legacy_page "
+            "FROM news_articles n LEFT JOIN profile_bank_recommendations r "
+            "ON r.news_id = n.id AND r.profile_id = ? ORDER BY n.published_at DESC, n.id DESC",
+            (profile_id,),
+        ).fetchall()
+    return [{**{key: row[key] for key in ("id", "title", "source", "url", "published_at", "event_title")},
+             "bank_recommendation": {key: row[key] for key in ("text", "page", "updated_at")},
+             "legacy_bank_recommendation": {"text": row["legacy_text"], "page": row["legacy_page"]}}
+            for row in rows]
+
+
+def save_bank_recommendation(profile_id: str, news_id: str, text: str, page: int | None) -> dict | None:
+    init_app_db()
+    text = text.strip()
+    with connect_app() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        # Check both foreign keys explicitly so deleted profiles/news produce a useful 404.
+        if not connection.execute("SELECT id FROM business_profiles WHERE id = ?", (profile_id,)).fetchone():
+            return None
+        if not connection.execute("SELECT id FROM news_articles WHERE id = ?", (news_id,)).fetchone():
+            return None
+        if not text:
+            connection.execute("DELETE FROM profile_bank_recommendations WHERE profile_id = ? AND news_id = ?",
+                               (profile_id, news_id))
+            return {"text": "", "page": None, "updated_at": None}
+        updated_at = now_utc()
+        connection.execute(
+            "INSERT INTO profile_bank_recommendations (profile_id, news_id, text, page, updated_at) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT(profile_id, news_id) DO UPDATE SET "
+            "text = excluded.text, page = excluded.page, updated_at = excluded.updated_at",
+            (profile_id, news_id, text, page, updated_at),
+        )
+    return {"text": text, "page": page, "updated_at": updated_at}
 
 
 def store_imported_news(source_id: str, items: list[dict]) -> int:

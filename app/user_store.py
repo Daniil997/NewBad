@@ -84,7 +84,7 @@ def init_app_db() -> None:
     with connect_app() as connection:
         connection.execute("PRAGMA journal_mode = WAL")
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-    if version > 12:
+    if version > 14:
         raise RuntimeError(f"Unsupported app database version: {version}")
     if version == 0:
         with connect_app() as connection:
@@ -420,6 +420,32 @@ def init_app_db() -> None:
                     )
                 """)
                 connection.execute("PRAGMA user_version = 12")
+        version = 12
+    if version == 12:
+        with connect_app() as connection:
+            connection.execute("BEGIN EXCLUSIVE")
+            if int(connection.execute("PRAGMA user_version").fetchone()[0]) == 12:
+                connection.execute("ALTER TABLE news_articles ADD COLUMN bank_recommendation TEXT NOT NULL DEFAULT ''")
+                connection.execute("ALTER TABLE news_articles ADD COLUMN bank_recommendation_page INTEGER")
+                connection.execute("ALTER TABLE news_articles ADD COLUMN bank_recommendation_updated_at TEXT")
+                connection.execute("PRAGMA user_version = 13")
+        version = 13
+    if version == 13:
+        with connect_app() as connection:
+            connection.execute("BEGIN EXCLUSIVE")
+            if int(connection.execute("PRAGMA user_version").fetchone()[0]) == 13:
+                # Preserve legacy shared texts in news_articles; never assign them to a company implicitly.
+                connection.execute("""
+                    CREATE TABLE profile_bank_recommendations (
+                        profile_id TEXT NOT NULL REFERENCES business_profiles(id) ON DELETE CASCADE,
+                        news_id TEXT NOT NULL REFERENCES news_articles(id) ON DELETE CASCADE,
+                        text TEXT NOT NULL,
+                        page INTEGER,
+                        updated_at TEXT NOT NULL,
+                        PRIMARY KEY (profile_id, news_id)
+                    )
+                """)
+                connection.execute("PRAGMA user_version = 14")
 
 
 def now_utc() -> str:

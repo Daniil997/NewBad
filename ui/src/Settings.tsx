@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import "./settings.css";
+import { NewsRecommendations } from "./NewsRecommendations";
 
 type SettingsData = {
   news_lookback_days: number; news_retention_days: number; news_max_items: number; news_collection_interval_hours: number;
@@ -27,6 +28,7 @@ type MarketStatus = {
 };
 const SECTIONS = [
   ["news", "Новости", "Источники и сбор"], ["models", "Модели", "Маршруты задач"],
+  ["recommendations", "Рекомендации банка", "Оценки для компаний"],
   ["markets", "Рыночные данные", "Курсы, акции, металлы"], ["analysis", "Персонализация", "Лента и обзор компании"],
   ["maintenance", "Обслуживание", "Очистка и сброс"],
 ] as const;
@@ -69,6 +71,7 @@ function dateTime(value?: string) {
 function Icon({ section }: { section: Section }) {
   const paths: Record<Section, string> = {
     news: "M5 4h14v16H5z M8 8h8 M8 12h8 M8 16h4",
+    recommendations: "M4 5h16v12H9l-5 4z M8 9h8 M8 13h5",
     models: "M8 8h8v8H8z M9 3v5 M15 3v5 M9 16v5 M15 16v5 M3 9h5 M3 15h5 M16 9h5 M16 15h5",
     markets: "M4 19h16 M6 15l4-5 4 3 5-8",
     analysis: "M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6",
@@ -95,8 +98,10 @@ export function Settings({ onBack }: { onBack: () => void }) {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState("");
   const [loading, setLoading] = useState(true);
-  const dirty = JSON.stringify(values) !== JSON.stringify(baseline);
-  const locked = !!busy || loading;
+  const [recommendationDirty, setRecommendationDirty] = useState(false);
+  const [recommendationBusy, setRecommendationBusy] = useState(false);
+  const dirty = JSON.stringify(values) !== JSON.stringify(baseline) || recommendationDirty;
+  const locked = !!busy || loading || recommendationBusy;
 
   async function refreshNews() { const result = await request<NewsStatus>("/api/settings/news/status"); setNews(result); return result; }
   async function refreshMarket() { const result = await request<MarketStatus>("/api/settings/market/status"); setMarket(result); return result; }
@@ -185,7 +190,12 @@ export function Settings({ onBack }: { onBack: () => void }) {
     } catch (reason) { setError((reason as Error).message); }
     finally { setBusy(""); }
   }
-  function back() { if (!dirty || window.confirm("Есть несохранённые изменения. Выйти без сохранения?")) onBack(); }
+  function back() { if (!recommendationBusy && (!dirty || window.confirm("Есть несохранённые изменения. Выйти без сохранения?"))) onBack(); }
+  function changeSection(next: Section) {
+    if (next === section || recommendationBusy) return;
+    if (recommendationDirty && !window.confirm("Есть несохранённая рекомендация. Перейти в другой раздел без сохранения?")) return;
+    setRecommendationDirty(false); setSection(next); setNotice("");
+  }
   const totals = (news?.latest?.sources ?? []).reduce((sum, item) => ({
     seen: sum.seen + (item.seen ?? 0), imported: sum.imported + item.imported,
     duplicates: sum.duplicates + item.duplicates, old: sum.old + (item.skipped_old ?? 0), rejected: sum.rejected + item.rejected,
@@ -201,7 +211,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
     <div className="dev-layout">
       <nav className="dev-nav" aria-label="Разделы настроек">
         <p className="dev-nav-caption">Настройки</p>
-        {SECTIONS.map(([id, label, hint]) => <button type="button" key={id} className={section === id ? "is-active" : ""} aria-current={section === id ? "page" : undefined} onClick={() => { setSection(id); }}><Icon section={id} /><span><strong>{label}</strong><small>{hint}</small></span>{id === "news" && news && <b>{news.stored_count}</b>}</button>)}
+        {SECTIONS.map(([id, label, hint]) => <button type="button" key={id} disabled={recommendationBusy} className={section === id ? "is-active" : ""} aria-current={section === id ? "page" : undefined} onClick={() => changeSection(id)}><Icon section={id} /><span><strong>{label}</strong><small>{hint}</small></span>{id === "news" && news && <b>{news.stored_count}</b>}</button>)}
         <div className="dev-nav-note"><span className={`dev-dot ${server?.allow_cloud ? "is-on" : ""}`} />{server ? server.allow_cloud ? "Облако разрешено" : "Облако выключено" : "Подключаемся к API…"}<small>Сбор RSS работает без модели</small></div>
       </nav>
       <div className="dev-content">
@@ -209,7 +219,8 @@ export function Settings({ onBack }: { onBack: () => void }) {
         {error && <div className="dev-alert is-error" role="alert">{error}{!values && !loading && <button type="button" className="dev-button is-secondary" onClick={() => void load()}>Повторить загрузку</button>}</div>}
         {notice && <div className="dev-alert is-success" role="status">{notice}</div>}
         {loading && <div className="dev-card dev-loading" role="status">Загружаем настройки и состояние источников…</div>}
-        {values && <form className="dev-form" onSubmit={(event) => { event.preventDefault(); void persist(); }}>
+        {section === "recommendations" && <NewsRecommendations onDirtyChange={setRecommendationDirty} onBusyChange={setRecommendationBusy} />}
+        {values && section !== "recommendations" && <form className="dev-form" onSubmit={(event) => { event.preventDefault(); void persist(); }}>
           <fieldset className="dev-controls" disabled={locked}>
             {section === "news" && <>
               <section className="dev-card">

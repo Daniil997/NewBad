@@ -92,6 +92,9 @@
 .news-page .news-state.is-loading .news-state-icon { animation: news-pulse 1.4s ease-in-out infinite; }
 .news-page .news-demo-actions { margin: 1.25rem .25rem 0; font-size: .8rem; }
 .news-page .news-facts { margin-top: .75rem; }
+.news-page .bank-recommendation blockquote { margin: .75rem 0 0; padding: .75rem 1rem; border-left: 3px solid #ef3124; border-radius: 0 10px 10px 0; background: #fff6f4; font-size: .9rem; line-height: 1.7; }
+.news-page .bank-recommendation-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.news-page .bank-recommendation .meta { color: #737984; font-size: .78rem; }
 .news-page :is(button, a, input, select, textarea, summary):focus-visible { outline: 3px solid #556f9e; outline-offset: 3px; }
 .news-page #news-feed { scroll-margin-top: 1rem; }
 @keyframes news-pulse { 50% { opacity: .35; } }

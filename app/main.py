@@ -37,7 +37,10 @@ from app.corpus.search import (
 )
 from app.db import ROOT, connect, init_db, journal_is_empty, journal_tables
 from app.ingest.news import import_news_catalog, load_news_sources, migrate_legacy_imports
-from app.news_store import clear_stored_news, prune_stored_news, recent_news_count, stored_news_count
+from app.news_store import (
+    bank_recommendations, clear_stored_news, prune_stored_news, recent_news_count,
+    recommendation_news, recommendation_profiles, save_bank_recommendation, stored_news_count,
+)
 from app.market_data import collect_market_data, load_market_config
 from app.market_store import latest_market_collection, market_history, market_snapshot, persist_profile_market_links, prune_market_data, record_market_collection, store_observations
 from app.personal_feed import (
@@ -747,6 +750,7 @@ def _real_feed_payload(user_id: str, *, enqueue_manual: bool = False, refresh_in
             (profile_id, profile_version),
         ).fetchall()
     reports_by_id = {row["news_id"]: row for row in saved_reports}
+    recommendations = bank_recommendations(profile_id)
     for item in news_items:
         analysis = state["items"].get(item.id)
         if analysis and analysis["news_hash"] != article_hash(item):
@@ -770,6 +774,7 @@ def _real_feed_payload(user_id: str, *, enqueue_manual: bool = False, refresh_in
             "excerpt": item.excerpt, "event_type": item.event_type or "unknown",
             "event_title": item.event_title or "Новости бизнеса", "source": item.source or "Официальный источник",
             "url": item.url, "analysis": analysis, "report": report,
+            "bank_recommendation": recommendations.get(item.id),
         })
     rows.sort(key=lambda item: (bool(item["analysis"] and item["analysis"]["relevant"]), item["analysis"]["score"] if item["analysis"] else 0, item["published_at"]), reverse=True)
     relevant = [row for row in rows if row["analysis"] and row["analysis"]["relevant"]]
@@ -1679,6 +1684,34 @@ def settings() -> SettingsView:
         placement_choice=choice,
         **news_settings,
     )
+
+
+class BankRecommendationUpdate(BaseModel):
+    profile_id: str = Field(min_length=1, max_length=200)
+    text: str = Field(max_length=10000)
+    page: int | None = Field(default=None, ge=1, le=10000)
+
+
+@app.get("/api/settings/news/recommendations")
+def news_recommendations_settings(profile_id: str) -> dict:
+    items = recommendation_news(profile_id)
+    if items is None:
+        raise HTTPException(status_code=404, detail="Профиль компании не найден")
+    return {"profile_id": profile_id, "items": items}
+
+
+@app.get("/api/settings/news/recommendation-profiles")
+def news_recommendation_profiles() -> dict:
+    return {"profiles": recommendation_profiles()}
+
+
+@app.put("/api/settings/news/{news_id}/recommendation")
+def update_news_recommendation(news_id: str, body: BankRecommendationUpdate, request: Request) -> dict:
+    _check_csrf(request)
+    saved = save_bank_recommendation(body.profile_id, news_id, body.text, body.page)
+    if saved is None:
+        raise HTTPException(status_code=404, detail="Новость или профиль больше не доступны. Обновите список.")
+    return {"profile_id": body.profile_id, "news_id": news_id, "bank_recommendation": saved}
 
 
 @app.get("/api/settings/news/status")

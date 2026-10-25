@@ -77,6 +77,37 @@ body:has(.dev-page) { background: #f6f7f9; }
 .dev-footnote { border-top: 1px solid #f0f1f4; padding-top: 16px; margin: 22px 0 0; font-size: 11px; color: #8b909a; line-height: 1.7; }
 .dev-text-button { border: 0; background: none; padding: 2px 0; font-size: 11px !important; color: #7a808c; white-space: nowrap; }
 .dev-text-button:hover { color: var(--dev-red); }
+.dev-page textarea { font: inherit; width: 100%; min-width: 0; background: #fff; border: 1px solid #dedfe5; color: #30353e; border-radius: 8px; padding: 11px; line-height: 1.6; resize: vertical; }
+.dev-page textarea:focus-visible { outline: 3px solid #e52b2370; outline-offset: 3px; }
+.dev-editor-grid { display: grid; grid-template-columns: minmax(210px, .8fr) minmax(0, 1.2fr); gap: 18px; align-items: start; }
+.dev-editor-list { padding: 18px; }
+.dev-editor-list > label { margin-top: 16px; }
+.dev-editor-list .dev-editor-news-heading { margin-top: 24px; padding-top: 20px; border-top: 1px solid #eeeef1; }
+.dev-assessment-company { margin-top: 16px; padding: 14px; border: 1px solid #e5e8ee; border-radius: 10px; background: #f7f8fa; overflow-wrap: anywhere; }
+.dev-assessment-company strong { color: #333943; font-size: 13px; }
+.dev-assessment-company p { color: #68717e; font-size: 12px; line-height: 1.6; margin: 7px 0; }
+.dev-assessment-company small { color: #8b929e; font-size: 10px; }
+.dev-legacy-assessment { margin-top: 18px; font-size: 12px; line-height: 1.6; }
+.dev-legacy-assessment summary { cursor: pointer; color: #7a808b; }
+.dev-legacy-assessment p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.dev-editor-list ul { padding: 3px; margin: 0 -3px; list-style: none; display: grid; gap: 8px; max-height: 65vh; overflow-y: auto; scrollbar-width: thin; }
+.dev-editor-list li { min-width: 0; }
+.dev-editor-list li button { display: grid; gap: 6px; width: 100%; text-align: left; background: #fff; border: 1px solid #e8e9ed; border-radius: 10px; padding: 12px; overflow-wrap: anywhere; }
+.dev-editor-list li button:hover { border-color: #d8b7b4; }
+.dev-editor-list li button[aria-current=true] { background: #fff5f3; border-color: #edbbb6; box-shadow: inset 3px 0 #e52b23; }
+.dev-editor-list li span, .dev-editor-list li small { font-size: 10px; color: #7a808b; line-height: 1.5; }
+.dev-editor-list li strong { font-size: 12px; color: #333943; line-height: 1.5; }
+.dev-recommendation-form h3 { line-height: 1.5; margin-top: 10px; overflow-wrap: anywhere; }
+.dev-recommendation-form > label { margin-top: 18px; }
+.dev-recommendation-form a { color: #bc2b24; }
+.dev-recommendation-preview { margin-top: 24px; padding-top: 20px; border-top: 1px solid #eeeef1; }
+.dev-recommendation-preview .bank-recommendation h3 { font-size: 14px; }
+.dev-recommendation-preview blockquote { margin: 12px 0 0; background: #fff6f4; border-left: 3px solid #ef3124; padding: 12px 14px; border-radius: 0 8px 8px 0; line-height: 1.7; font-size: 13px; overflow-wrap: anywhere; }
+.dev-recommendation-preview .bank-recommendation-text { white-space: pre-wrap; }
+.dev-recommendation-preview .badge { background: #fff0df; color: #875c17; }
+.dev-recommendation-preview .meta, .dev-recommendation-preview .hint { color: #7a808b; font-size: 11px; }
+.dev-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+@media (max-width: 1000px) { .dev-editor-grid { grid-template-columns: minmax(0, 1fr); } .dev-editor-list ul { max-height: 23rem; } }
 .dev-funnel { display: flex; flex-wrap: wrap; gap: 10px 18px; background: #f7f8fa; border: 1px solid #eeeef2; padding: 12px 14px; border-radius: 8px; margin: 0 0 15px; font-size: 10px; color: #818692; }
 .dev-funnel b { color: #424954; font-weight: 650; margin-right: 3px; }
 .dev-sources { display: grid; }

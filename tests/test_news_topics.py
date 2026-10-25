@@ -115,4 +115,4 @@ def test_v10_migration_backfills_once_without_changing_article(monkeypatch, tmp_
     assert saved["event_title"] == "Денежный рынок"
     assert {key: saved[key] for key in row} == row
     with connect_app() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 12
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
