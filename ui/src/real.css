@@ -171,6 +171,33 @@
 .real .chat-msg .chat-cites { margin-top: .5rem; font-size: .82rem; color: #555; white-space: normal; }
 .real .chat-msg .chat-cites a { color: #bf2318; }
 .real .chat-form { display: grid; grid-template-columns: 1fr auto; gap: .5rem; align-items: end; }
+.real .chat-workspace-toolbar { display: flex; justify-content: space-between; align-items: center; gap: .75rem; margin-bottom: 1rem; }
+.real .real-workspace.has-chat { grid-template-columns: minmax(0, 1fr); }
+.real .real-workspace.has-chat > .feed-card { display: none; }
+.real .chat-workspace-grid { display: grid; grid-template-columns: minmax(150px, 210px) minmax(0, 1fr); gap: 1rem; }
+.real .chat-sessions { min-width: 0; border-right: 1px solid #ece8e4; padding-right: .8rem; }
+.real .chat-sessions h2 { font-size: 1rem; margin: 0 0 .7rem; }
+.real .chat-session-list { display: grid; gap: .4rem; max-height: 62vh; overflow-y: auto; margin-top: .7rem; }
+.real .chat-session { display: grid; gap: .3rem; text-align: left; width: 100%; min-width: 0; padding: .7rem; background: #fff; border: 1px solid #e8e4df; border-radius: 12px; cursor: pointer; color: inherit; }
+.real .chat-session:hover { background: #faf8f5; }
+.real .chat-session.active { border-color: #dc2a1d; background: #fff5f3; }
+.real .chat-session strong, .real .chat-session-preview { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.real .chat-session small, .real .chat-session-kind, .real .chat-session-preview { font-size: .75rem; color: #6d6863; }
+.real .chat-conversation { min-width: 0; }
+.real .chat-conversation-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .75rem; margin-bottom: .6rem; font-size: .8rem; }
+.real .chat-delete-confirm { background: #fff5f3; border: 1px solid #f3c4be; border-radius: 12px; padding: .8rem; margin-bottom: .8rem; }
+.real .chat-delete-confirm p { margin: 0 0 .7rem; }
+.real .chat-conversation-content { min-width: 0; border: 0; margin: 0; padding: 0; }
+.real .chat-rename-link { display: block; margin: 0 0 .6rem auto; font-size: .8rem; }
+.real .chat-rename { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .7rem; }
+.real .chat-retry { display: grid; gap: .3rem; margin-top: .5rem; }
+.real .chat-panel textarea { width: 100%; min-height: 5rem; resize: vertical; }
+@media (max-width: 1100px) {
+  .real .chat-workspace-grid { grid-template-columns: 1fr; }
+  .real .chat-sessions { border-right: 0; border-bottom: 1px solid #ece8e4; padding: 0 0 .8rem; }
+  .real .chat-session-list { display: flex; overflow-x: auto; max-height: 12rem; }
+  .real .chat-session { flex: 0 0 185px; }
+}
 
 /* ── обзор и рынки ── */
 .real .secondary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }

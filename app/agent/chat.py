@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
+from app.agent.business_context import conversation_evidence
 from app.agent.generate import answer_with_model, answered_mode
 from app.agent.tools import run_tool
 from app.corpus.search import CorpusError
@@ -11,7 +12,7 @@ from app.tracing.journal import log_llm_call, trace_scope
 
 _MAX_SEARCHES = 2
 _MAX_TURNS = 8
-_FOLLOW = ("повтори", "что ты сказал", "как ты ответил", "предыдущ")
+_FOLLOW = ("повтори", "что ты сказал", "как ты ответил")
 _SEARCH = ("найди", "поищи", "другие материал", "что еще", "еще источник")
 _SKIP = frozenset(
     "найди поищи другие материал материалы банка банке какие какой какая какие еще источник источники "
@@ -64,7 +65,11 @@ def _follow(history: list[tuple[str, str]]) -> tuple[str, str, list[Citation]]:
 
 def _from_card(card: Card, question: str, history: list[tuple[str, str]]) -> tuple[str, str, list[Citation]]:
     with trace_scope(card.client_id, card.event_id):
-        model_answer = answer_with_model(question, _card_text(card, history), _evidence(card))
+        model_answer = answer_with_model(question, _card_text(card, history), [
+            *_evidence(card), *conversation_evidence(
+                [{"role": role, "content": text} for role, text in history], question
+            ),
+        ])
         if model_answer:
             citations = _citations_in_text(card, model_answer)
             return _decorate(model_answer, citations), answered_mode(), citations
@@ -147,7 +152,7 @@ def _card_text(card: Card, history: list[tuple[str, str]]) -> str:
             parts.append(source.quote)
         if source.url:
             parts.append(source.url)
-    for role, text in history:
+    for role, text in history[-_MAX_TURNS:]:
         parts.append(f"{role}: {text}")
     return " ".join(part for part in parts if part)
 
@@ -255,9 +260,8 @@ def _history(client_id: str, event_id: str) -> list[tuple[str, str]]:
                 SELECT role, text FROM chat_turns
                 WHERE client_id = ? AND event_id = ? AND role IN ('user', 'assistant')
                 ORDER BY id DESC
-                LIMIT ?
                 """,
-                (client_id, event_id, _MAX_TURNS),
+                (client_id, event_id),
             ).fetchall()
     except (JournalError, OSError) as error:
         raise ValueError("Контекст диалога недоступен") from error
@@ -285,7 +289,6 @@ def _remember(card: Card, question: str, outcome: tuple[str, str, list[Citation]
     text, mode, citations = outcome
     _insert(card.client_id, card.event_id, "user", question)
     _insert(card.client_id, card.event_id, "assistant", text)
-    _trim(card.client_id, card.event_id)
     source_ids = list(dict.fromkeys([*_source_ids(card), *(item.source_id for item in citations)]))
     return ChatReply(answer=text, mode=mode, source_ids=source_ids, citations=citations)
 
@@ -303,20 +306,3 @@ def _insert(client_id: str, event_id: str, role: str, text: str) -> None:
             )
     except JournalError as error:
         raise ValueError("Контекст диалога недоступен") from error
-
-
-def _trim(client_id: str, event_id: str) -> None:
-    with connect() as connection:
-        connection.execute(
-            """
-            DELETE FROM chat_turns
-            WHERE client_id = ? AND event_id = ? AND role IN ('user', 'assistant')
-              AND id NOT IN (
-                SELECT id FROM chat_turns
-                WHERE client_id = ? AND event_id = ? AND role IN ('user', 'assistant')
-                ORDER BY id DESC
-                LIMIT ?
-              )
-            """,
-            (client_id, event_id, client_id, event_id, _MAX_TURNS),
-        )

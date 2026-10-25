@@ -81,7 +81,7 @@ $PythonForCommand = $Python.Replace("'", "''")
 $ApiCommand = @'
 Set-Location -LiteralPath '{0}'
 $Host.UI.RawUI.WindowTitle = 'NewBad API logs'
-& '{1}' -u -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+& '{1}' -u -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --reload-dir app
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Write-Host "NewBad API завершился с ошибкой (код $LASTEXITCODE)." -ForegroundColor Red

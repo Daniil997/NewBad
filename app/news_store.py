@@ -2,6 +2,7 @@
 
 from datetime import date, timedelta
 
+from app.news_topics import news_topic
 from app.user_store import app_db_path, connect_app, init_app_db, now_utc
 
 
@@ -11,7 +12,7 @@ def imported_news() -> list[dict]:
     init_app_db()
     with connect_app() as connection:
         rows = connection.execute(
-            "SELECT id, source_id, source, url, title, published_at, text, loaded_at, sha256 "
+            "SELECT id, source_id, source, url, title, published_at, text, loaded_at, sha256, event_type, event_title "
             "FROM news_articles ORDER BY published_at DESC, loaded_at DESC"
         ).fetchall()
     return [dict(row) for row in rows]
@@ -41,15 +42,19 @@ def store_imported_news(source_id: str, items: list[dict]) -> int:
                         (item["text"], item["sha256"], item["loaded_at"], existing["id"]),
                     )
                 continue
+            event_type, event_title = item.get("event_type"), item.get("event_title")
+            if not event_type or not event_title:
+                event_type, event_title = news_topic(item["title"], item["text"])
             cursor = connection.execute(
                 """
                 INSERT OR IGNORE INTO news_articles (
-                    id, source_id, source, url, title, published_at, text, loaded_at, sha256, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, source_id, source, url, title, published_at, text, loaded_at, sha256, created_at,
+                    event_type, event_title
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item["id"], source_id, item["source"], item["url"], item["title"], item["published_at"],
-                    item["text"], item["loaded_at"], item["sha256"], now_utc(),
+                    item["text"], item["loaded_at"], item["sha256"], now_utc(), event_type, event_title,
                 ),
             )
             added += cursor.rowcount

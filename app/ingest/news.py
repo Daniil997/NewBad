@@ -18,6 +18,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from app.db import ROOT
+from app.news_topics import news_topic
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,8 @@ class ImportedNews(BaseModel):
     sha256: str
     status: str
     duplicate_of: str | None = None
+    event_type: str | None = None
+    event_title: str | None = None
 
 
 class RejectedNews(BaseModel):
@@ -550,6 +553,7 @@ def _normalize(
         return None, RejectedNews(url=url, title=title, reason="текст новости отсутствует или слишком короткий")
     # Заголовок больше не подменяет содержание: это создавало фиктивные «новости» без фактов.
     identifier = _identifier(_child_local(raw, "guid") or _child_local(raw, "id"), url, source.id)
+    event_type, event_title = news_topic(title, text)
     item = ImportedNews(
         id=identifier,
         url=url,
@@ -560,6 +564,8 @@ def _normalize(
         loaded_at=loaded_at,
         sha256=_checksum(title, url, published, text, source.name),
         status="imported",
+        event_type=event_type,
+        event_title=event_title,
     )
     return item, None
 

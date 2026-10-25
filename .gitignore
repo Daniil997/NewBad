@@ -38,3 +38,4 @@ data/*.sqlite3.bak*
 # Frontend
 node_modules/
 ui/dist/
+ui/test-results/

@@ -50,7 +50,7 @@ def build_feed(client_id: str, today: date | None = None) -> Feed | None:
 
 
 def corpus_version() -> str:
-    parts = [f"n:{item.id}:{item.published_at}" for item in load_news()]
+    parts = [f"n:{item.id}:{item.published_at}:{item.event_type}:{item.event_title}" for item in load_news()]
     parts.extend(f"b:{item.doc_id}:{item.published_at}" for item in load_bank_documents())
     scoring = (ROOT / "config" / "scoring.yaml").read_text(encoding="utf-8")
     parts.append("s:" + hashlib.sha256(scoring.encode("utf-8")).hexdigest()[:8])
@@ -123,6 +123,13 @@ def _score_item(
         factors.append(ScoreFactor(id="link", label="Связь с компанией", value=0, note="тип события неизвестен"))
     else:
         factors.append(ScoreFactor(id="link", label="Связь с компанией", value=0, note="нет связи с профилем компании"))
+    # Editable demo profiles use the same topic/interest vocabulary as real profiles.
+    # An explicitly chosen topic is a preference, never proof of a bank product.
+    preferences = _profile_preferences(profile, item.event_type)
+    if preferences:
+        factors.append(_factor("preferences", "Интересы профиля", weights["industry"], 0.6,
+                               "выбрано в профиле: " + ", ".join(preferences)))
+        linked = True
     if linked and event_title:
         factors[-1].note = f"{factors[-1].note}, тип «{event_title}»"
     bank = 1.0 if bank_topics & set(spec.get("bank_topics") or []) else 0.0
@@ -166,7 +173,7 @@ def _bands(items: list[FeedItem], thresholds: dict) -> tuple[list[FeedItem], lis
     low: list[FeedItem] = []
     for item in items:
         confirmed = any(factor.id == "exposure" for factor in item.factors)
-        industry = any(factor.id == "industry" for factor in item.factors)
+        industry = any(factor.id in {"industry", "preferences"} for factor in item.factors)
         if confirmed and item.score >= high_bar and len(high) < top_n:
             high.append(item.model_copy(update={"band": "high"}))
         elif (confirmed or industry) and item.score >= extra_bar:
@@ -178,6 +185,24 @@ def _bands(items: list[FeedItem], thresholds: dict) -> tuple[list[FeedItem], lis
 
 def _factor(factor_id: str, label: str, weight: float, raw: float, note: str) -> ScoreFactor:
     return ScoreFactor(id=factor_id, label=label, value=round(weight * raw, 4), note=note)
+
+
+def _profile_preferences(profile: ClientProfile, event_type: str | None) -> list[str]:
+    from app.personal_feed import INDUSTRY_EVENT_MAP, INTEREST_EVENT_MAP, INTEREST_LABELS, TOPIC_EVENT_MAP
+    from app.profile.real_taxonomy import REAL_PROFILE_TAXONOMY
+
+    values = {feature.id: feature.value for feature in profile.features if feature.origin == "client_input"}
+    selected = []
+    for field, mapping, label_key in (
+        ("focus_topics", TOPIC_EVENT_MAP, "focus_topics"), ("industry_tags", INDUSTRY_EVENT_MAP, "industry_tags"),
+    ):
+        labels = {option["id"]: option["label"] for option in REAL_PROFILE_TAXONOMY[label_key]}
+        for key in values.get(field, "").split(", "):
+            if event_type in mapping.get(key, set()):
+                selected.append(labels[key])
+    selected.extend(label for key, label in INTEREST_LABELS.items()
+                    if values.get(key) == "interested" and event_type in INTEREST_EVENT_MAP[key])
+    return selected
 
 
 def _matched(profile: ClientProfile, event_exposures: list[str]) -> list[Exposure]:

@@ -123,3 +123,19 @@ def test_search_tool_error_stays_on_the_card(monkeypatch, tmp_path):
     assert response.json()["mode"] == "mock"
     assert "Инструмент поиска не ответил" in response.json()["answer"]
     assert response.json()["citations"] == []
+
+
+def test_demo_history_survives_more_than_four_exchanges_and_is_scoped(monkeypatch, tmp_path):
+    monkeypatch.setenv("LLM_MODE", "mock")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    with TestClient(app) as client:
+        url = "/api/clients/U-SAVER/events/cbr-rate-14/chat"
+        for _ in range(5):
+            assert client.post(url, json={"question": "Что говорит банк?"}).status_code == 200
+        restored = client.get(url)
+        assert restored.status_code == 200
+        assert len(restored.json()["messages"]) == 10
+        sessions = client.get("/api/clients/U-SAVER/chats").json()["sessions"]
+        assert sessions[0]["event_id"] == "cbr-rate-14"
+        assert sessions[0]["message_count"] == 10
+        assert client.get("/api/clients/U-BORROWER/events/cbr-rate-14/chat").json()["messages"] == []

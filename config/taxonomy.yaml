@@ -31,6 +31,18 @@ event_types:
     exposures: [rate_borrower, rate_saver]
     weight: 0.8
     bank_topics: [bonds]
+  money_market:
+    title: Денежный рынок
+    priority: 80
+    triggers:
+      - {phrase: ruonia}
+      - {phrase: руониа}
+      - {phrase: денежный рынок}
+      - {phrase: денежного рынка}
+      - {phrase: межбанковск}
+    exposures: [rate_borrower, rate_saver]
+    weight: 0.7
+    bank_topics: []
   inflation_macro:
     title: Инфляция
     priority: 60
@@ -72,6 +84,8 @@ event_types:
       - {phrase: brent}
       - {phrase: urals}
       - {phrase: газ}
+      - {phrase: спг}
+      - {phrase: lng}
       - {phrase: угл}
       - {phrase: сырь, broad: true}
     exposures: [commodity_energy, commodity_metals]

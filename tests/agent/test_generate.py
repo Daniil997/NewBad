@@ -265,7 +265,7 @@ def test_cloud_copy_uses_the_heavy_route(monkeypatch):
         tokens=1,
     )
     card = draft_card(ctx)
-    assert seen == {"tier": "heavy", "max_tokens": 400}
+    assert seen == {"tier": "heavy", "max_tokens": 900}
     assert card.llm_trace.origin == "model"
     assert card.llm_trace.mode == "cloud_only"
     assert card.llm_trace.provider == "cloud"
@@ -313,7 +313,7 @@ def test_profile_chat_assesses_indirect_impact_without_inventing_numbers(monkeyp
     assert result is not None
     assert "Оценка для компании" in result["answer"]
     assert result["evidence_ids"] == ["company-profile", "news:item"]
-    assert "всё равно дай полезную оценку косвенных сценариев" in prompts[0]
+    assert "не приписывай её компании" in prompts[0]
     assert "focus=true" in prompts[0]
 
     def invented(messages, *, tier, max_tokens, **_route_options):

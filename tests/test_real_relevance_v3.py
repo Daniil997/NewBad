@@ -76,3 +76,17 @@ def test_country_russia_alone_is_not_a_business_specific_geography_signal():
     )
     assert not result["relevant"]
     assert result["score"] < WEAK_LINK
+
+
+def test_specific_source_anchors_can_surface_a_conditional_link_missed_by_rules():
+    profile = {"description": "Разрабатываем телеметрию для промышленных предприятий"}
+    news = article("Изменились требования к оборудованию промышленных предприятий", "unknown")
+    model = {"score": 0.95, "relevant": True,
+             "profile_basis": "телеметрию для промышленных предприятий",
+             "news_basis": "требования к оборудованию промышленных предприятий",
+             "impact_channel": "Изменение требований у клиентов может повлиять на спрос на телеметрию"}
+    result = calibrate_model_result(profile, news, model)
+    assert WEAK_LINK <= result["score"] < CLEAR_LINK
+    assert "косвенная" in result["reasons"][0]
+    invented = calibrate_model_result(profile, news, {**model, "profile_basis": "Импортируем промышленное оборудование"})
+    assert invented["score"] < WEAK_LINK

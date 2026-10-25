@@ -8,7 +8,7 @@ import {
   LAYER_LABEL, ORIGIN_LABEL, ROLE_LABEL, bandInfo,
   type ClientProfile, type ClientSummary, type Feed, type FeedItem, type NewsMeta,
 } from "./demoTypes";
-import { formatDay } from "./realTypes";
+import { NewsAnalysis, NewsArticleHeading, NewsFeedPanel, NewsPageHeader, NewsRelevance, NewsState, inNewsPeriod } from "./NewsWorkspace";
 
 type Claim = {
   id: string;
@@ -65,15 +65,20 @@ export function Service({
   const [newsMeta, setNewsMeta] = useState<Record<string, NewsMeta>>({});
   const [feed, setFeed] = useState<Feed | null>(null);
   const [feedPhase, setFeedPhase] = useState<Phase>("loading");
+  const [profileDirty, setProfileDirty] = useState(false);
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [profileRevision, setProfileRevision] = useState(0);
   const [view, setView] = useState<"news" | "profile">("news");
   const [tab, setTab] = useState<"top" | "all">("top");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
+  const [period, setPeriod] = useState("window");
   const [eventId, setEventId] = useState("");
   const [card, setCard] = useState<InsightCard | null>(null);
   const [cardPhase, setCardPhase] = useState<Phase>("loading");
   const [steps, setSteps] = useState<string[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [savedChats, setSavedChats] = useState<{ event_id: string; title: string }[]>([]);
   const [question, setQuestion] = useState("");
   const [asking, setAsking] = useState(false);
   const [failedQuestion, setFailedQuestion] = useState("");
@@ -88,6 +93,8 @@ export function Service({
   const [feedbackSent, setFeedbackSent] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const detailRef = useRef<HTMLElement | null>(null);
+  const chatScope = useRef("");
+  chatScope.current = `${selected}:${eventId}`;
 
   // Справочники, не зависящие от выбранной компании: список компаний для переключателя и даты/источники новостей.
   useEffect(() => {
@@ -104,14 +111,18 @@ export function Service({
   }, []);
 
   useEffect(() => {
-    if (!selected) {
-      return;
-    }
-    const controller = new AbortController();
     setView("news");
     setTab("top");
     setQuery("");
     setCategory("all");
+    setPeriod("window");
+  }, [selected]);
+
+  useEffect(() => {
+    if (!selected) {
+      return;
+    }
+    const controller = new AbortController();
     setMessages([]);
     setFailedQuestion("");
     setProfile(null);
@@ -147,7 +158,7 @@ export function Service({
         // Если «важных» новостей нет, открываем первую из остальных, а не пустой экран.
         const next = payload.top[0]?.news_id ?? payload.less_relevant[0]?.news_id ?? "";
         setEventId(next);
-        setTab(payload.top.length > 0 ? "top" : "all");
+        if (payload.top.length === 0) setTab("all");
         setFeedPhase(payload.top.length + payload.less_relevant.length === 0 ? "empty" : "ready");
         if (!next) {
           setCardPhase("empty");
@@ -160,7 +171,7 @@ export function Service({
         }
       });
     return () => controller.abort();
-  }, [selected, attempt]);
+  }, [selected, attempt, profileRevision]);
 
   useEffect(() => {
     if (!selected || !eventId) {
@@ -172,6 +183,7 @@ export function Service({
     setCard(null);
     setCardPhase("loading");
     setCardError("");
+    setSteps([]);
     setFeedbackSent(false);
     void fetch(`/api/clients/${selected}/events/${eventId}/card`, { method: "POST", signal: controller.signal })
       .then((response) => {
@@ -206,7 +218,7 @@ export function Service({
     setEventId(id);
     setView("news");
     if (window.matchMedia("(max-width: 860px)").matches) {
-      window.setTimeout(() => detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+      window.setTimeout(() => detailRef.current?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }), 0);
     }
   }
 
@@ -235,11 +247,23 @@ export function Service({
     }
   }
 
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`/api/clients/${selected}/chats`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : { sessions: [] })
+      .then((data) => { if (!controller.signal.aborted) setSavedChats(data.sessions); }).catch(() => {});
+    if (eventId) void fetch(`/api/clients/${selected}/events/${eventId}/chat`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : { messages: [] })
+      .then((data) => { if (!controller.signal.aborted) setMessages(data.messages.map((row: { role: string; text: string }) => ({ role: row.role === "user" ? "user" : "service", text: row.text }))); }).catch(() => {});
+    return () => controller.abort();
+  }, [selected, eventId]);
+
   async function ask(text: string) {
     const cleaned = text.trim();
     if (!cleaned || !selected || !eventId || asking) {
       return;
     }
+    const scope = `${selected}:${eventId}`;
     setQuestion("");
     setFailedQuestion("");
     setAsking(true);
@@ -250,6 +274,7 @@ export function Service({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: cleaned }),
       });
+      if (chatScope.current !== scope) return;
       if (!response.ok) {
         setFailedQuestion(cleaned);
         setMessages((current) => [
@@ -259,8 +284,11 @@ export function Service({
         return;
       }
       const payload = (await response.json()) as { answer: string };
+      if (chatScope.current !== scope) return;
+      setSavedChats((current) => current.some((row) => row.event_id === eventId) ? current : [{ event_id: eventId, title: newsMeta[eventId]?.title || eventId }, ...current]);
       setMessages((current) => [...current, { role: "service", text: plainAnswer(payload.answer) }]);
     } catch {
+      if (chatScope.current !== scope) return;
       setFailedQuestion(cleaned);
       setMessages((current) => [
         ...current,
@@ -324,8 +352,10 @@ export function Service({
     ).entries(),
   ];
   const needle = query.trim().toLocaleLowerCase("ru-RU");
+  const latestDate = allItems.map((item) => item.published_at).sort().at(-1);
   const visible = (tab === "top" ? feed?.top ?? [] : allItems).filter((item) => {
     if (category !== "all" && item.event_type !== category) return false;
+    if (!inNewsPeriod(item.published_at, period, latestDate)) return false;
     if (!needle) return true;
     const meta = newsMeta[item.news_id];
     return `${item.title} ${meta?.excerpt ?? ""} ${meta?.source ?? ""}`.toLocaleLowerCase("ru-RU").includes(needle);
@@ -338,12 +368,19 @@ export function Service({
   const sourceName = meta?.source || newsSource?.origin || "";
   const sourceUrl = meta?.url || newsSource?.url || "";
 
+  function navigateFromProfile(action: () => void) {
+    if (profileBusy) return;
+    if (profileDirty && !window.confirm("Есть несохранённые изменения профиля. Выйти без сохранения?")) return;
+    setProfileDirty(false);
+    action();
+  }
+
   const header = (
     <header className="bank-bar">
-      <button className="bar-button" type="button" onClick={onHome}>Альфа-Бизнес</button>
-      <ModeSwitch mode={mode} onChange={onModeChange} />
+      <button className="bar-button" type="button" onClick={() => navigateFromProfile(onHome)}>Альфа-Бизнес</button>
+      <ModeSwitch mode={mode} onChange={(next) => navigateFromProfile(() => onModeChange(next))} />
       <div className="bar-user">
-        <button className="bar-button bar-small" type="button" onClick={onLogout}>
+        <button className="bar-button bar-small" type="button" onClick={() => navigateFromProfile(onLogout)}>
           Выйти
         </button>
       </div>
@@ -363,152 +400,70 @@ export function Service({
     return (
       <div className="bank real">
         {header}
-        <main className="bank-main form-main">
+        <main className="bank-main company-profile-main">
           {banner}
-          <DemoProfile profile={profile} onBack={() => setView("news")} />
+          <DemoProfile profile={profile}
+            onBack={() => { setView("news"); setProfileRevision((value) => value + 1); }}
+            onSaved={(saved) => {
+              setClients((current) => current.map((client) => client.client_id === selected ? { ...client, title: saved.company_name || client.title } : client));
+            }} onDirtyChange={setProfileDirty} onBusyChange={setProfileBusy}
+          />
         </main>
       </div>
     );
   }
 
   return (
-    <div className="bank real">
+    <div className="bank real news-page">
       {header}
       <main className="bank-main">
-        <div className="real-head">
-          <div>
-            <h1>Что важно для вашей компании</h1>
-            {profile ? (
-              <p className="session-line">
-                Тестовые данные · {profile.title}, {ROLE_LABEL[profile.money_role] ?? profile.money_role}.
-                {profile.exposures.length > 0
-                  ? ` Учитываем: ${profile.exposures.map((item) => item.title.toLocaleLowerCase("ru")).join(", ")}.`
-                  : ""}
-              </p>
-            ) : (
-              <p className="session-line">{profileError ? "Профиль не загрузился." : "Загружаем профиль…"}</p>
-            )}
-          </div>
-          <div className="real-head-actions">
-            {clients.length > 1 ? (
-              <label className="company-switch">
-                <span className="sr-only">Компания</span>
-                <select
-                  className="input"
-                  value={selected}
-                  onChange={(event) => onSwitch(event.target.value)}
-                  aria-label="Сменить компанию"
-                >
-                  {clients.map((client) => (
-                    <option key={client.client_id} value={client.client_id}>
-                      {client.title} · {ROLE_LABEL[client.money_role] ?? client.money_role}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-            <button type="button" className="btn btn-ghost" onClick={() => void resetReceivedData()} disabled={resettingData}>
-              {resettingData ? "Сбрасываем…" : "Сбросить полученные данные"}
-            </button>
-            <button type="button" className="btn btn-primary" onClick={() => setView("profile")} disabled={!profile}>
-              Профиль компании
-            </button>
-          </div>
-        </div>
+        <NewsPageHeader company={profile?.title || "Загружаем компанию…"}
+          context={profile ? `Тестовые данные · ${ROLE_LABEL[profile.money_role] ?? profile.money_role}` : "Загружаем профиль"}
+          actions={<>
+            <button type="button" className="btn btn-ghost" onClick={() => setView("profile")} disabled={!profile}>Профиль компании</button>
+            <button type="button" className="btn btn-primary" disabled={!card} onClick={() => document.getElementById("demo-chat-question")?.focus()}>Спросить о новости</button>
+          </>}
+        >
+          {clients.length > 1 ? <label className="company-switch"><span className="sr-only">Компания</span>
+            <select className="input" value={selected} onChange={(event) => onSwitch(event.target.value)} aria-label="Сменить компанию">
+              {clients.map((client) => <option key={client.client_id} value={client.client_id}>{client.title}</option>)}
+            </select>
+          </label> : null}
+        </NewsPageHeader>
         {banner}
 
         <div className="workspace real-workspace">
-          <section className="card feed-card" aria-label="Новости">
-            <div className="seg-tabs" role="tablist" aria-label="Какие новости показывать">
-              <button type="button" role="tab" aria-selected={tab === "top"} onClick={() => setTab("top")}>
-                Для вас{feed ? <span className="count">{feed.top.length}</span> : null}
-              </button>
-              <button type="button" role="tab" aria-selected={tab === "all"} onClick={() => setTab("all")}>
-                Все новости{feed ? <span className="count">{allItems.length}</span> : null}
-              </button>
-            </div>
-            {feedPhase === "loading" ? <p className="hint" role="status">Собираем ленту…</p> : null}
-            {feedPhase === "error" ? <p className="inline-error">Лента не загрузилась.</p> : null}
-            {feed ? (
-              <p className="hint small">
-                {tab === "top"
-                  ? "Новости с заметной связью с вашей компанией, самые важные выше."
-                  : "Все новости тестового набора. Чем выше, тем важнее для этой компании."}
-              </p>
-            ) : null}
-            <div className="feed-tools">
-              <input
-                className="input"
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Поиск по теме или источнику"
-                aria-label="Поиск по новостям"
-              />
-            </div>
-            <details className="filters" open={category !== "all"}>
-              <summary>Фильтры{category !== "all" ? " · включены" : ""}</summary>
-              <div className="filters-grid">
-                <label className="field">
-                  <span className="field-label">Тип события</span>
-                  <select className="input" value={category} onChange={(event) => setCategory(event.target.value)}>
-                    <option value="all">Все типы</option>
-                    {categories.map(([type, title]) => (
-                      <option key={type} value={type}>{title}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            </details>
-            <FeedList
-              items={visible}
-              selectedId={eventId}
-              meta={newsMeta}
-              onSelect={selectEvent}
-              emptyText={
-                !feed
-                  ? ""
-                  : query || category !== "all"
-                    ? "По вашему запросу ничего не найдено."
-                    : tab === "top"
-                      ? "Пока нет новостей с заметной связью с компанией. Загляните во «Все новости»."
-                      : "В тестовом наборе нет новостей."
-              }
-            />
-          </section>
+          <NewsFeedPanel personal={tab === "top"} onPersonal={(personal) => setTab(personal ? "top" : "all")}
+            personalCount={feed?.top.length ?? 0} totalCount={allItems.length}
+            query={query} onQuery={setQuery} category={category} onCategory={setCategory} categories={categories}
+            period={period} onPeriod={setPeriod} periodLabel="Весь тестовый набор"
+            onRefresh={() => setAttempt((value) => value + 1)} refreshing={feedPhase === "loading"} loading={feedPhase === "loading"}
+            error={feedPhase === "error" ? feedError : undefined}
+            items={visible.map((item) => ({ id: item.news_id, title: item.title, date: item.published_at,
+              category: newsMeta[item.news_id]?.event_title, source: newsMeta[item.news_id]?.source,
+              excerpt: newsMeta[item.news_id]?.excerpt, score: item.score, relevance: bandInfo(item.band) }))}
+            selectedId={eventId} onSelect={selectEvent}
+            emptyText={tab === "top" ? "Пока нет новостей с заметной связью с компанией. Откройте все новости." : "В тестовом наборе нет новостей."}
+          />
 
           <section className="card real-detail" ref={detailRef} aria-label="Разбор">
             {card && cardPhase === "ready" ? (
-              <article className="detail">
-                <p className="eyebrow">
-                  {meta?.event_title || "Новость"}
-                  {publishedAt ? ` · ${formatDay(publishedAt)}` : ""}
-                </p>
-                <h2 className="detail-title">{detailTitle}</h2>
-                {sourceName || sourceUrl ? (
-                  <p className="detail-source">
-                    {sourceName}
-                    {sourceUrl ? (
-                      <>
-                        {sourceName ? " · " : ""}
-                        <a href={sourceUrl} target="_blank" rel="noreferrer">Читать первоисточник ↗</a>
-                      </>
-                    ) : null}
-                  </p>
-                ) : null}
-                {meta?.excerpt ? <p className="detail-excerpt">{meta.excerpt}</p> : null}
-
+              <article className="detail real-insight-card">
+                <NewsArticleHeading title={detailTitle} category={meta?.event_title} date={publishedAt} source={sourceName} url={sourceUrl} />
                 {selectedItem ? <WhyBlock item={selectedItem} /> : null}
                 <CardBody card={card} />
-                {card.missing_data.length > 0 ? (
-                  <p className="note">Чтобы сказать точнее, в профиле нет: {humanList(card.missing_data)}.</p>
-                ) : null}
                 <details className="tech">
                   <summary>Как получен вывод</summary>
                   <Trace card={card} steps={steps} />
+                  {card.missing_data.length ? <p className="hint">Поля для уточнения: {humanList(card.missing_data)}.</p> : null}
                 </details>
 
                 <div className="detail-block">
+                  {savedChats.length ? <label className="field"><span className="field-label">Сохранённые диалоги по новостям</span>
+                    <select className="input" aria-label="Сохранённые диалоги по новостям" value={savedChats.some((row) => row.event_id === eventId) ? eventId : ""} onChange={(event) => selectEvent(event.target.value)}>
+                      <option value="" disabled>Выберите разговор</option>{savedChats.map((row) => <option key={row.event_id} value={row.event_id}>{row.title}</option>)}
+                    </select>
+                  </label> : null}
                   <DemoChat
                     questions={card.action.questions}
                     messages={messages}
@@ -532,19 +487,17 @@ export function Service({
                 </div>
               </article>
             ) : (
-              <p className="empty" role="status">
-                {!selected
-                  ? "Выберите компанию."
-                  : cardPhase === "error"
-                    ? "Не удалось собрать карточку."
-                    : cardPhase === "empty" || (feedPhase === "ready" && !eventId) || feedPhase === "empty"
-                      ? "В ленте нет новости для карточки."
-                      : "Собираем карточку…"}
-              </p>
+              <NewsState loading={feedPhase === "loading" || (Boolean(eventId) && cardPhase === "loading")}
+                title={cardPhase === "error" ? "Не удалось подготовить разбор" : eventId ? "Готовим разбор новости" : "Выберите новость"}
+                text={cardPhase === "error" ? "Попробуйте загрузить новость ещё раз." : eventId ? "Сопоставляем событие с профилем вашей компании." : "Откройте публикацию в ленте — здесь появятся факты, оценка влияния и возможные действия."}
+                action={cardPhase === "error" ? "Повторить" : undefined} onAction={() => setAttempt((value) => value + 1)} />
             )}
           </section>
         </div>
 
+        <div className="news-demo-actions"><button type="button" className="btn-link" onClick={() => void resetReceivedData()} disabled={resettingData}>
+          {resettingData ? "Сбрасываем…" : "Сбросить полученные данные"}
+        </button></div>
         <details className="card paste">
           <summary>Разобрать свою новость</summary>
           <p className="hint">Вставьте текст. Разбор будет таким же: новость, банк и вывод для компании.</p>
@@ -573,63 +526,14 @@ export function Service({
   );
 }
 
-function FeedList({
-  items,
-  selectedId,
-  meta,
-  onSelect,
-  emptyText,
-}: {
-  items: FeedItem[];
-  selectedId: string;
-  meta: Record<string, NewsMeta>;
-  onSelect: (newsId: string) => void;
-  emptyText: string;
-}) {
-  if (items.length === 0) {
-    return emptyText ? <p className="empty">{emptyText}</p> : null;
-  }
-  return (
-    <ul className="news-list">
-      {items.map((item) => {
-        const info = bandInfo(item.band);
-        const record = meta[item.news_id];
-        const active = item.news_id === selectedId;
-        return (
-          <li key={item.news_id}>
-            <button
-              type="button"
-              className={`news-row${active ? " active" : ""}`}
-              aria-current={active ? "true" : undefined}
-              onClick={() => onSelect(item.news_id)}
-            >
-              <span className="news-row-meta">
-                {record?.event_title ? `${record.event_title} · ` : ""}
-                {item.published_at ? formatDay(item.published_at) : ""}
-              </span>
-              <span className="news-row-title">{item.title}</span>
-              <span className="news-row-foot">
-                <span className="news-row-source">{record?.source ?? ""}</span>
-                <span className={`chip chip-${info.level}`}>{info.label}</span>
-              </span>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
 function WhyBlock({ item }: { item: FeedItem }) {
   const info = bandInfo(item.band);
   const reasons = item.reason.split(";").map((part) => part.trim()).filter(Boolean);
   const factors = item.factors ?? [];
   return (
-    <section className="detail-block">
-      <h3>Почему эта новость в вашей ленте</h3>
-      <p><span className={`chip chip-${info.level}`}>{info.label}</span></p>
+    <NewsRelevance label={info.label} level={info.level}>
       {reasons.length > 0 ? (
-        <ul className="reasons">
+        <ul className="real-link-signals">
           {reasons.map((reason, index) => <li key={`${index}-${reason}`}>{reason}</li>)}
         </ul>
       ) : null}
@@ -645,7 +549,7 @@ function WhyBlock({ item }: { item: FeedItem }) {
           ))}
         </ul>
       </details>
-    </section>
+    </NewsRelevance>
   );
 }
 
@@ -653,44 +557,13 @@ function CardBody({ card }: { card: InsightCard }) {
   const caveats = [...card.what_happened.assumptions, ...card.consequences.depends_on];
   return (
     <>
-      <p className="legend">
-        <span>
-          <Badge layer="confirmed_fact" /> из новости
-        </span>
-        <span>
-          <Badge layer="bank_position" /> слова аналитиков банка
-        </span>
-        <span>
-          <Badge layer="model_inference" /> вывод для вашей компании
-        </span>
-      </p>
-      <section className="detail-block">
-        <h3>Что произошло</h3>
-        <Claims claims={card.what_happened.claims} />
-      </section>
-      <section className="detail-block">
-        <h3>Что это значит для вас</h3>
-        <Claims claims={card.why_for_company.claims} />
-        <div className="report">
-          <div className="report-cols">
-            <div className="report-col risk">
-              <h4>Риск</h4>
-              <Claims claims={card.consequences.risks} />
-            </div>
-            <div className="report-col chance">
-              <h4>Возможность</h4>
-              <Claims claims={card.consequences.opportunities} />
-            </div>
-          </div>
-        </div>
-      </section>
-      <section className="detail-block">
-        <h3>Что сделать</h3>
-        <p>
-          <Badge layer="model_inference" /> {card.action.next_step}
-        </p>
-        <Caveats lines={caveats} />
-      </section>
+      <NewsAnalysis
+        facts={<Claims claims={card.what_happened.claims} />}
+        meaning={<Claims claims={card.why_for_company.claims} />}
+        risks={<Claims claims={card.consequences.risks} />}
+        opportunities={<Claims claims={card.consequences.opportunities} />}
+        nextStep={<><p><Badge layer="model_inference" /> {card.action.next_step}</p><Caveats lines={caveats} /></>}
+      />
       <section className="detail-block">
         <h3>Что говорят аналитики банка</h3>
         {card.bank_view.status === "found" ? (

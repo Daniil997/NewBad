@@ -20,6 +20,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
+from app.agent.business_context import conversation_evidence, profile_evidence
+from app.chat_store import fail_turn, finish_turn, recover_stale_turns, start_turn
 from app.agent.chat import ChatReply, answer_from_card
 from app.agent.failure import failure_detail
 from app.agent.generate import analyze_profile_news, answer_profile_chat, select_profile_news
@@ -44,6 +46,7 @@ from app.personal_feed import (
     claim_job,
     enqueue_job,
     fail_job,
+    evaluate as evaluate_profile_news,
     job_profile,
     missing_candidates,
     save_job_results,
@@ -74,7 +77,9 @@ from app.user_store import (
     user_for_session,
     now_utc,
 )
-from app.profile.build import ClientProfile, ClientSummary, get_profile, load_profiles
+from app.profile.build import ClientProfile, ClientSummary, get_profile, get_original_profile, load_profiles
+from app.profile.demo_profiles import demo_profile_context, invalidate_demo_feed
+from app.profile.details import ExtendedProfile
 from app.profile.real_taxonomy import REAL_PROFILE_TAXONOMY
 from app.profile.site_crawler import SiteFetchError, crawl_site
 from app.profile.site_extract import SiteExtractionError, extract_profile_suggestions
@@ -188,11 +193,17 @@ class ChatQuestion(BaseModel):
 
 
 class ProfileChatStart(BaseModel):
+    new_chat: bool = False
     news_id: str | None = Field(default=None, max_length=120)
 
 
 class ProfileChatMessage(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
+    request_id: str | None = Field(default=None, min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9_-]+$")
+
+
+class ProfileChatRename(BaseModel):
+    title: str = Field(min_length=1, max_length=180)
 
 
 class ProfileNewsReportRequest(BaseModel):
@@ -222,7 +233,7 @@ class AuthState(BaseModel):
 InterestState = Literal["interested", "not_relevant", "unknown"]
 
 
-class BusinessProfileInput(BaseModel):
+class BusinessProfileInput(ExtendedProfile):
     model_config = {"extra": "forbid"}
 
     company_name: str = Field(default="", max_length=200)
@@ -501,8 +512,8 @@ async def _analysis_worker() -> None:
             by_id = {item.id: item for item in imported if item.status == "imported"}
             candidate_items = [by_id[news_id] for news_id in job["candidate_ids"] if news_id in by_id]
             model_results = {}
-            for offset in range(0, len(candidate_items), 30):
-                batch = candidate_items[offset:offset + 30]
+            for offset in range(0, len(candidate_items), 4):
+                batch = candidate_items[offset:offset + 4]
                 ranked = await asyncio.to_thread(select_profile_news, profile, batch)
                 if ranked:
                     model_results.update(ranked)
@@ -802,8 +813,9 @@ def create_profile_news_report(news_id: str, payload: ProfileNewsReportRequest, 
     if news is None:
         raise HTTPException(status_code=404, detail="Новость отсутствует в актуальном официальном окне")
     news_hash = article_hash(news)
-    report_version = "profile-news-report-v2"
     task_route = resolve_route("heavy", task="news_report", space="real")
+    numeric_validation = int(developer_settings().get("validate_numeric_grounding", True))
+    report_version = f"profile-news-report-v3:{task_route.provider}:{task_route.model}:{numeric_validation}"
     logger.info(
         "news_report_start news_id=%s profile_id=%s refresh=%s task_route_mode=%s task_route_provider=%s task_route_model=%s task_route_reason=%s",
         news_id, saved["profile_id"], payload.refresh, task_route.mode, task_route.provider,
@@ -861,26 +873,9 @@ def create_profile_news_report(news_id: str, payload: ProfileNewsReportRequest, 
     return {**report, "created_at": now, "cached": False, "citations": citations}
 
 
-def _profile_chat_evidence(saved: dict, focused_news_id: str | None) -> list[dict]:
+def _profile_chat_evidence(saved: dict, focused_news_id: str | None, question: str = "") -> list[dict]:
     profile = saved["profile"]
-    fields = {
-        "Компания": profile.get("company_name"), "Отрасль": profile.get("industry"),
-        "Описание": profile.get("description"), "Товары и услуги": profile.get("products_services"),
-        "Клиенты": profile.get("customer_types"), "Модель бизнеса": profile.get("business_model"),
-        "Регион": ", ".join(filter(None, [profile.get("country"), profile.get("region"), profile.get("city")])),
-        "Размер и этап": ", ".join(filter(None, [profile.get("size_band"), profile.get("business_stage")])),
-        "Отраслевые теги": ", ".join(profile.get("industry_tags", [])),
-        "Интересы": ", ".join(profile.get("focus_topics", [])),
-        "География рынков": ", ".join(profile.get("market_geographies", [])),
-        "Зависимости и факторы": "; ".join(filter(None, [profile.get("dependencies"), profile.get("external_factors")])),
-        "Контекст компании": profile.get("context_note"),
-    }
-    profile_text = "\n".join(f"{label}: {value}" for label, value in fields.items() if value)
-    evidence = [{
-        "evidence_id": "company-profile", "title": "Профиль компании пользователя",
-        "text": profile_text or "Профиль компании пока не содержит заполненных сведений.",
-        "url": "", "published_at": "", "kind": "profile",
-    }]
+    evidence = [profile_evidence(profile)]
     articles = _fresh_real_news(developer_settings()["news_lookback_days"])
     # Фокусную новость ищем во всём официальном каталоге, а не только в свежей ленте:
     # открытый пользователем материал должен оставаться контекстом чата после истечения lookback.
@@ -892,6 +887,18 @@ def _profile_chat_evidence(saved: dict, focused_news_id: str | None) -> list[dic
     # В общем чате оставляем свежие материалы, чтобы можно было обсуждать бизнес в целом.
     if focused_news_id and selected is None:
         raise HTTPException(status_code=404, detail="Выбранная новость больше недоступна")
+    if not focused_news_id:
+        # Prefer materials matching the question and business, rather than the
+        # first five publications in storage. Keep the focused chat immutable.
+        ranked_ids = {}
+        if question:
+            try:
+                ranked_ids = {hit.id: hit.score for hit in search_news(question, limit=100)}
+            except CorpusError:
+                pass
+        articles = sorted(articles, key=lambda item: (
+            ranked_ids.get(item.id, 0), evaluate_profile_news(profile, item)["score"], item.published_at,
+        ), reverse=True)
     chosen = [selected] if focused_news_id else articles[:5]
     for item in chosen:
         evidence.append({
@@ -926,14 +933,45 @@ def _profile_chat_session(owner_id: str, session_id: str):
 
 
 @app.get("/api/real/chat/sessions")
-def list_profile_chat_sessions(request: Request) -> dict:
+def list_profile_chat_sessions(request: Request, offset: int = 0) -> dict:
     user = _require_user(request)
+    offset = max(0, offset)
     with connect_app() as connection:
         rows = connection.execute(
-            "SELECT id, title, focused_news_id, created_at, updated_at FROM profile_chat_sessions "
-            "WHERE owner_id = ? ORDER BY updated_at DESC LIMIT 50", (user["id"],),
+            "SELECT s.id, s.title, s.focused_news_id, s.created_at, s.updated_at, "
+            "(SELECT COUNT(*) FROM profile_chat_messages m WHERE m.session_id = s.id) AS message_count, "
+            "(SELECT substr(text, 1, 160) FROM profile_chat_messages m WHERE m.session_id = s.id "
+            "ORDER BY m.id DESC LIMIT 1) AS preview "
+            "FROM profile_chat_sessions s WHERE s.owner_id = ? ORDER BY s.updated_at DESC, s.id DESC LIMIT 51 OFFSET ?",
+            (user["id"], offset),
         ).fetchall()
-    return {"sessions": [dict(row) for row in rows]}
+    return {"sessions": [dict(row) for row in rows[:50]], "has_more": len(rows) > 50}
+
+
+@app.patch("/api/real/chat/sessions/{session_id}")
+def rename_profile_chat_session(session_id: str, payload: ProfileChatRename, request: Request) -> dict:
+    _check_csrf(request)
+    user = _require_user(request)
+    _profile_chat_session(user["id"], session_id)
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="Укажите название диалога")
+    with connect_app() as connection:
+        connection.execute("UPDATE profile_chat_sessions SET title = ? WHERE id = ?", (title, session_id))
+    return {"id": session_id, "title": title}
+
+
+@app.delete("/api/real/chat/sessions/{session_id}", status_code=204)
+def delete_profile_chat_session(session_id: str, request: Request) -> Response:
+    _check_csrf(request)
+    user = _require_user(request)
+    with connect_app() as connection:
+        deleted = connection.execute(
+            "DELETE FROM profile_chat_sessions WHERE id = ? AND owner_id = ?", (session_id, user["id"]),
+        ).rowcount
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Диалог не найден")
+    return Response(status_code=204)
 
 
 @app.post("/api/real/chat/sessions")
@@ -950,6 +988,15 @@ def create_profile_chat_session(payload: ProfileChatStart, request: Request) -> 
         if focused is None:
             raise HTTPException(status_code=404, detail="Новость не найдена среди официальных материалов")
         title = focused.title[:180]
+    if not payload.new_chat:
+        with connect_app() as connection:
+            existing = connection.execute(
+                "SELECT id, title, focused_news_id FROM profile_chat_sessions "
+                "WHERE owner_id = ? AND profile_id = ? AND focused_news_id IS ? ORDER BY updated_at DESC LIMIT 1",
+                (user["id"], saved["profile_id"], payload.news_id),
+            ).fetchone()
+        if existing:
+            return dict(existing)
     session_id = str(uuid.uuid4())
     now = now_utc()
     with connect_app() as connection:
@@ -967,10 +1014,12 @@ def create_profile_chat_session(payload: ProfileChatStart, request: Request) -> 
 def get_profile_chat_session(session_id: str, request: Request) -> dict:
     user = _require_user(request)
     session = _profile_chat_session(user["id"], session_id)
+    recover_stale_turns(session_id)
     with connect_app() as connection:
         rows = connection.execute(
-            "SELECT role, text, citations_json, created_at FROM profile_chat_messages "
-            "WHERE session_id = ? ORDER BY id", (session_id,),
+            "SELECT m.role, m.text, m.citations_json, m.created_at, r.request_id, r.status AS request_status "
+            "FROM profile_chat_messages m LEFT JOIN profile_chat_requests r ON r.user_message_id = m.id "
+            "WHERE m.session_id = ? ORDER BY m.id", (session_id,),
         ).fetchall()
     messages = []
     for row in rows:
@@ -978,7 +1027,8 @@ def get_profile_chat_session(session_id: str, request: Request) -> dict:
             citations = json.loads(row["citations_json"])
         except (TypeError, json.JSONDecodeError):
             citations = []
-        messages.append({"role": row["role"], "text": row["text"], "citations": citations, "created_at": row["created_at"]})
+        messages.append({"role": row["role"], "text": row["text"], "citations": citations, "created_at": row["created_at"],
+                         "request_id": row["request_id"], "request_status": row["request_status"]})
     return {**dict(session), "messages": messages}
 
 
@@ -990,40 +1040,42 @@ def send_profile_chat_message(session_id: str, payload: ProfileChatMessage, requ
     saved = business_profile_for_owner(user["id"])
     if not saved or saved["profile_id"] != session["profile_id"]:
         raise HTTPException(status_code=409, detail="Профиль компании недоступен")
-    evidence = _profile_chat_evidence(saved, session["focused_news_id"])
-    with connect_app() as connection:
-        rows = connection.execute(
-            "SELECT role, text FROM profile_chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 8",
-            (session_id,),
-        ).fetchall()
-    history = [{"role": row["role"], "content": row["text"]} for row in reversed(rows)]
-    result = answer_profile_chat(payload.question.strip(), history, evidence)
-    if result is None:
-        raise HTTPException(status_code=503, detail=failure_detail(
-            "Модель не смогла подготовить ответ по подтверждённым материалам. Попробуйте переформулировать вопрос или проверить доступность модели.",
-            "Попробуйте переформулировать вопрос.",
-        ))
-    by_id = {item["evidence_id"]: item for item in evidence}
-    citations = [
-        {"title": by_id[item_id]["title"], "url": by_id[item_id]["url"],
-         "published_at": by_id[item_id]["published_at"], "kind": by_id[item_id]["kind"]}
-        for item_id in result["evidence_ids"]
-    ]
-    now = now_utc()
-    with connect_app() as connection:
-        connection.execute(
-            "INSERT INTO profile_chat_messages (session_id, role, text, citations_json, created_at) VALUES (?, 'user', ?, '[]', ?)",
-            (session_id, payload.question.strip(), now),
-        )
-        connection.execute(
-            "INSERT INTO profile_chat_messages (session_id, role, text, citations_json, created_at) VALUES (?, 'assistant', ?, ?, ?)",
-            (session_id, result["answer"], json.dumps(citations, ensure_ascii=False), now),
-        )
-        connection.execute(
-            "UPDATE profile_chat_sessions SET profile_version = ?, updated_at = ? WHERE id = ?",
-            (saved["profile_version"], now, session_id),
-        )
-    return {"role": "assistant", "text": result["answer"], "citations": citations, "created_at": now}
+    question = payload.question.strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="Введите сообщение")
+    # Save the user's words before contacting the model. A failed request can be
+    # retried with the same key without duplicating either side of the exchange.
+    key, cached, lease = start_turn(session_id, question, payload.request_id)
+    if cached:
+        return cached
+    try:
+        evidence = _profile_chat_evidence(saved, session["focused_news_id"], question)
+        with connect_app() as connection:
+            current = connection.execute(
+                "SELECT user_message_id FROM profile_chat_requests WHERE session_id = ? AND request_id = ?",
+                (session_id, key),
+            ).fetchone()
+            rows = connection.execute(
+                "SELECT role, text FROM profile_chat_messages WHERE session_id = ? AND id < ? ORDER BY id",
+                (session_id, current["user_message_id"]),
+            ).fetchall()
+        history = [{"role": row["role"], "content": row["text"]} for row in rows]
+        result = answer_profile_chat(question, history, evidence)
+        if result is None:
+            raise HTTPException(status_code=503, detail=failure_detail(
+                "Не удалось подготовить ответ. Ваше сообщение сохранено — можно повторить попытку.",
+                "Ваше сообщение сохранено. Повторите попытку позже.",
+            ))
+        by_id = {item["evidence_id"]: item for item in [*evidence, *conversation_evidence(history, question)]}
+        citations = [
+            {"title": by_id[item_id]["title"], "url": by_id[item_id]["url"],
+             "published_at": by_id[item_id]["published_at"], "kind": by_id[item_id]["kind"]}
+            for item_id in dict.fromkeys(result["evidence_ids"])
+        ]
+        return finish_turn(session_id, key, {**result, "citations": citations}, saved["profile_version"], lease)
+    except Exception:
+        fail_turn(session_id, key, lease)
+        raise
 
 
 @app.post("/api/real/feed/analyze")
@@ -1089,10 +1141,15 @@ def analyze_real_profile_site(body: SiteAnalysisRequest, request: Request) -> di
     if not body.consent:
         raise HTTPException(status_code=400, detail="Подтвердите отправку текста страниц выбранной модели")
     user = _require_user(request)
-    saved = business_profile_for_owner(user["id"])
+    return _analyze_profile_site(body, user["id"])
+
+
+def _analyze_profile_site(body: SiteAnalysisRequest, user_id: str) -> dict:
+    user = {"id": user_id}
+    saved = business_profile_for_owner(user_id)
     if not saved:
         raise HTTPException(status_code=404, detail="Профиль компании не найден")
-    claim = claim_site_analysis(user["id"])
+    claim = claim_site_analysis(user_id)
     if claim is None:
         raise HTTPException(status_code=404, detail="Профиль компании не найден")
     if claim == "busy":
@@ -1212,8 +1269,13 @@ def apply_real_profile_suggestions(request: Request) -> dict:
 def decide_real_profile_suggestion(body: ProfileSuggestionDecision, request: Request) -> dict:
     _check_csrf(request)
     user = _require_user(request)
+    return _decide_profile_suggestion(body, user["id"])
+
+
+def _decide_profile_suggestion(body: ProfileSuggestionDecision, user_id: str) -> dict:
+    user = {"id": user_id}
     if body.accept:
-        candidates = pending_profile_suggestions(user["id"])
+        candidates = pending_profile_suggestions(user_id)
         candidate = next(
             (
                 item for item in candidates
@@ -1257,12 +1319,16 @@ def decide_real_profile_suggestion(body: ProfileSuggestionDecision, request: Req
 def update_real_profile(body: BusinessProfileInput, request: Request) -> dict:
     _check_csrf(request)
     user = _require_user(request)
+    return _save_profile(body, user["id"])
+
+
+def _save_profile(body: BusinessProfileInput, user_id: str) -> dict:
     profile = body.model_dump()
     for key, value in profile.items():
         if isinstance(value, str):
             profile[key] = value.strip()
         elif isinstance(value, list):
-            profile[key] = [item.strip() for item in value if item.strip()]
+            profile[key] = [item.strip() for item in value if item.strip()] if all(isinstance(item, str) for item in value) else value
 
     website = profile["website"]
     if website:
@@ -1278,10 +1344,80 @@ def update_real_profile(body: BusinessProfileInput, request: Request) -> dict:
         if profile["company_name"] and (profile["description"] or profile["description_skipped"])
         else "incomplete"
     )
-    saved = save_business_profile(user["id"], profile, status)
+    saved = save_business_profile(user_id, profile, status)
     if not saved:
         raise HTTPException(status_code=404, detail="Профиль компании не найден")
     return {"profile": _profile_view(saved)}
+
+
+def _demo_original(client_id: str) -> ClientProfile:
+    _check_id(client_id, "компании")
+    original = get_original_profile(client_id)
+    if original is None:
+        raise HTTPException(status_code=404, detail="Тестовая компания не найдена")
+    return original
+
+
+@app.get("/api/demo/clients/{client_id}/profile")
+def demo_profile(client_id: str) -> dict:
+    with demo_profile_context(_demo_original(client_id)) as owner:
+        return {"profile": _profile_view(business_profile_for_owner(owner))}
+
+
+@app.put("/api/demo/clients/{client_id}/profile")
+def update_demo_profile(client_id: str, body: BusinessProfileInput, request: Request) -> dict:
+    _check_csrf(request)
+    with demo_profile_context(_demo_original(client_id)) as owner:
+        result = _save_profile(body, owner)
+    invalidate_demo_feed(client_id)
+    return result
+
+
+@app.get("/api/demo/clients/{client_id}/profile/options")
+def demo_profile_options(client_id: str) -> dict:
+    _demo_original(client_id)
+    return REAL_PROFILE_TAXONOMY
+
+
+@app.get("/api/demo/clients/{client_id}/profile/suggestions")
+def demo_profile_suggestions(client_id: str) -> dict:
+    with demo_profile_context(_demo_original(client_id)) as owner:
+        return {"suggestions": pending_profile_suggestions(owner)}
+
+
+@app.get("/api/demo/clients/{client_id}/profile/sources")
+def demo_profile_sources(client_id: str) -> dict:
+    with demo_profile_context(_demo_original(client_id)) as owner:
+        return {"sources": accepted_profile_sources(owner)}
+
+
+@app.post("/api/demo/clients/{client_id}/profile/site-analysis")
+def analyze_demo_profile_site(client_id: str, body: SiteAnalysisRequest, request: Request) -> dict:
+    _check_csrf(request)
+    if not body.consent:
+        raise HTTPException(status_code=400, detail="Подтвердите отправку текста страниц выбранной модели")
+    with demo_profile_context(_demo_original(client_id)) as owner:
+        return _analyze_profile_site(body, owner)
+
+
+@app.post("/api/demo/clients/{client_id}/profile/suggestions/decision")
+def decide_demo_profile_suggestion(client_id: str, body: ProfileSuggestionDecision, request: Request) -> dict:
+    _check_csrf(request)
+    with demo_profile_context(_demo_original(client_id)) as owner:
+        result = _decide_profile_suggestion(body, owner)
+    invalidate_demo_feed(client_id)
+    return result
+
+
+@app.post("/api/demo/clients/{client_id}/profile/suggestions/apply")
+def apply_demo_profile_suggestions(client_id: str, request: Request) -> dict:
+    _check_csrf(request)
+    with demo_profile_context(_demo_original(client_id)) as owner:
+        saved, fields = _apply_pending_suggestions(owner)
+        result = {"profile": _profile_view(saved), "filled_fields": fields,
+                  "suggestions": pending_profile_suggestions(owner), "sources": accepted_profile_sources(owner)}
+    invalidate_demo_feed(client_id)
+    return result
 
 
 @app.post("/api/auth/logout")
@@ -1398,6 +1534,35 @@ def event_steps(client_id: str, event_id: str) -> dict:
     if get_profile(client_id) is None:
         raise HTTPException(status_code=404, detail="Компания не найдена")
     return {"steps": latest_steps(client_id, event_id), "trace": read_trace(client_id, event_id)}
+
+
+@app.get("/api/clients/{client_id}/chats")
+def demo_chat_sessions(client_id: str) -> dict:
+    _check_id(client_id, "компании")
+    if get_profile(client_id) is None:
+        raise HTTPException(status_code=404, detail="Компания не найдена")
+    titles = {item.id: item.title for item in load_news()}
+    with connect() as connection:
+        rows = connection.execute(
+            "SELECT event_id, COUNT(*) AS message_count, MAX(id) AS last_id FROM chat_turns "
+            "WHERE client_id = ? AND role IN ('user', 'assistant') GROUP BY event_id ORDER BY last_id DESC",
+            (client_id,),
+        ).fetchall()
+    return {"sessions": [{**dict(row), "title": titles.get(row["event_id"], row["event_id"])} for row in rows]}
+
+
+@app.get("/api/clients/{client_id}/events/{event_id}/chat")
+def demo_chat_history(client_id: str, event_id: str) -> dict:
+    _check_id(client_id, "компании")
+    _check_id(event_id, "события")
+    if get_profile(client_id) is None:
+        raise HTTPException(status_code=404, detail="Компания не найдена")
+    with connect() as connection:
+        rows = connection.execute(
+            "SELECT role, text FROM chat_turns WHERE client_id = ? AND event_id = ? "
+            "AND role IN ('user', 'assistant') ORDER BY id", (client_id, event_id),
+        ).fetchall()
+    return {"messages": [dict(row) for row in rows]}
 
 
 @app.post("/api/clients/{client_id}/events/{event_id}/chat")

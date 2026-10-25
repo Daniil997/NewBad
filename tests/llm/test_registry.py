@@ -61,5 +61,5 @@ def test_budget_and_call_limits_follow_the_instruction():
     assert time_budget_s() == 90
     assert token_limit("plan") == 120
     assert token_limit("fact") == 180
-    assert token_limit("copy") == 400
+    assert token_limit("copy") == 900
     assert token_limit("answer") == 1200

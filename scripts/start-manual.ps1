@@ -38,18 +38,25 @@ function Test-PortOpen {
     }
 }
 
-function Test-OurServer {
+function Get-OurServerRootPid {
     param($Info, [int]$Port)
-    if (-not $Info) { return $false }
-    $name = [string]$Info.Name
-    $command = [string]$Info.CommandLine
-    if ($Port -eq 8000 -and $name -match 'python' -and $command -match 'uvicorn' -and $command -match 'app\.main:app') {
-        return $true
+    if (-not $Info) { return 0 }
+    if ($Port -eq 5173 -and [string]$Info.Name -match 'node' -and [string]$Info.CommandLine -match 'vite') {
+        return [int]$Info.ProcessId
     }
-    if ($Port -eq 5173 -and $name -match 'node' -and $command -match 'vite') {
-        return $true
+    if ($Port -ne 8000 -or [string]$Info.Name -notmatch 'python') { return 0 }
+    # With --reload the listener is a multiprocessing child. Stop the uvicorn
+    # supervisor (and venv launcher), so no process retains the listening socket.
+    $serverRoot = 0
+    $current = $Info
+    for ($depth = 0; $depth -lt 5 -and $current; $depth++) {
+        if ([string]$current.Name -notmatch 'python') { break }
+        if ([string]$current.CommandLine -match 'uvicorn' -and [string]$current.CommandLine -match 'app\.main:app') {
+            $serverRoot = [int]$current.ProcessId
+        }
+        $current = Get-CimInstance Win32_Process -Filter "ProcessId=$($current.ParentProcessId)" -ErrorAction SilentlyContinue
     }
-    return $false
+    return $serverRoot
 }
 
 function Test-DockerProxy {
@@ -65,8 +72,9 @@ function Stop-NewBad {
     foreach ($port in @(8000, 5173)) {
         foreach ($procId in (Get-ListeningPids $port)) {
             $info = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue
-            if (Test-OurServer $info $port) {
-                & taskkill.exe /PID $procId /T /F | Out-Null
+            $serverRoot = Get-OurServerRootPid $info $port
+            if ($serverRoot -gt 0) {
+                & taskkill.exe /PID $serverRoot /T /F | Out-Null
                 Write-Host "Остановлен порт $port."
                 $stopped = $true
             } elseif (Test-DockerProxy $info) {

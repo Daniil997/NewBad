@@ -32,7 +32,7 @@ limits:
   max_tokens:
     plan: 120
     fact: 180
-    copy: 400
+    copy: 900
     answer: 1200
     profile_site: 1200
 

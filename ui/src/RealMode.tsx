@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import "./real.css";
+import { CompanyProfile } from "./CompanyProfile";
 import { ModeSwitch, type AppMode } from "./ModeSwitch";
 import {
-  EMPTY_PROFILE, PROFILE_FIELD_LABELS, profilePayload,
-  type BusinessProfile, type MarketHistory, type ProfileOptions, type RealFeed, type RealMarkets,
-  type SavedProfile, type SiteSuggestion, type User,
+  EMPTY_PROFILE, relevanceInfo,
+  type BusinessProfile, type MarketHistory, type RealFeed, type RealMarkets,
+  type SavedProfile, type User,
 } from "./realTypes";
 import {
-  ChatPanel, CurrencyRatesPanel, isCurrencyRatesNews, MarketsPanel, NewsDetail, NewsList, ProfileForm, ProfileSourcesPanel, SuggestionsPanel,
+  CurrencyRatesPanel, isCurrencyRatesNews, MarketsPanel, NewsDetail,
 } from "./RealParts";
+
+import { ChatWorkspace } from "./ChatWorkspace";
+import { NewsFeedPanel, NewsPageHeader, NewsState, inNewsPeriod } from "./NewsWorkspace";
 
 export function RealMode({
   mode,
@@ -35,14 +39,6 @@ export function RealMode({
   const [profileBusy, setProfileBusy] = useState(false);
   const [editingProfile, setEditingProfile] = useState(true);
   const [profileDirty, setProfileDirty] = useState(false);
-  const [profileOptions, setProfileOptions] = useState<ProfileOptions>({ industry_tags: [], focus_topics: [] });
-  const [siteConsent, setSiteConsent] = useState(false);
-  const [siteBusy, setSiteBusy] = useState(false);
-  const [siteWarnings, setSiteWarnings] = useState<string[]>([]);
-  const [siteScanPages, setSiteScanPages] = useState<{ url: string; title: string }[]>([]);
-  const [siteScanned, setSiteScanned] = useState(false);
-  const [siteSuggestions, setSiteSuggestions] = useState<SiteSuggestion[]>([]);
-  const [profileSources, setProfileSources] = useState<SiteSuggestion[]>([]);
   const [realFeed, setRealFeed] = useState<RealFeed | null>(null);
   const [realMarkets, setRealMarkets] = useState<RealMarkets | null>(null);
   const [marketHistories, setMarketHistories] = useState<Record<string, MarketHistory>>({});
@@ -55,6 +51,7 @@ export function RealMode({
   const [feedRefreshKey, setFeedRefreshKey] = useState(0);
   const [selectedNewsId, setSelectedNewsId] = useState("");
   const [activeChatId, setActiveChatId] = useState("");
+  const [chatOpen, setChatOpen] = useState(false);
   const [chatBusy, setChatBusy] = useState(false);
   const [newsReportBusy, setNewsReportBusy] = useState("");
   const detailRef = useRef<HTMLElement | null>(null);
@@ -127,28 +124,34 @@ export function RealMode({
     return () => window.clearTimeout(timer);
   }, [notice]);
 
+  useEffect(() => {
+    if (!user) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(`business-chat-view:${user.id}`) || "null");
+      if (typeof saved?.open === "boolean") { setActiveChatId(saved.id || ""); setChatOpen(saved.open); }
+    } catch { /* the saved view is optional */ }
+  }, [user?.id]);
+
+  function selectChat(id: string) {
+    setActiveChatId(id); setChatOpen(true);
+    try { localStorage.setItem(`business-chat-view:${user!.id}`, JSON.stringify({ id, open: true })); } catch { /* optional */ }
+  }
+
+  function closeChats() {
+    setChatOpen(false);
+    try { localStorage.setItem(`business-chat-view:${user!.id}`, JSON.stringify({ id: activeChatId, open: false })); } catch { /* optional */ }
+  }
+
   async function loadProfile(): Promise<void> {
-    const [response, optionsResponse, suggestionsResponse, sourcesResponse] = await Promise.all([
-      fetch("/api/real/profile"),
-      fetch("/api/real/profile/options"),
-      fetch("/api/real/profile/suggestions"),
-      fetch("/api/real/profile/sources"),
+    const [response, suggestionsResponse] = await Promise.all([
+      fetch("/api/real/profile"), fetch("/api/real/profile/suggestions"),
     ]);
     if (!response.ok) throw new Error("Не удалось загрузить профиль компании");
-    if (!optionsResponse.ok) throw new Error("Не удалось загрузить варианты профиля");
-    if (!suggestionsResponse.ok) throw new Error("Не удалось загрузить предложения сайта");
-    if (!sourcesResponse.ok) throw new Error("Не удалось загрузить источники полей профиля");
     const payload = (await response.json()) as { profile: SavedProfile };
-    setProfileOptions((await optionsResponse.json()) as ProfileOptions);
-    const suggestions = ((await suggestionsResponse.json()) as { suggestions: SiteSuggestion[] }).suggestions;
-    const sources = ((await sourcesResponse.json()) as { sources: SiteSuggestion[] }).sources;
-    setProfileSources(sources);
-    const savedProfile = payload.profile;
-    setSiteSuggestions(suggestions);
-    setProfile({ ...EMPTY_PROFILE, ...savedProfile });
-    setProfileMeta(savedProfile);
-    // Never approve AI-suggested information on page load.
-    setEditingProfile(suggestions.length > 0 || savedProfile.status !== "complete");
+    const suggestions = suggestionsResponse.ok ? (await suggestionsResponse.json()).suggestions : [];
+    setProfile({ ...EMPTY_PROFILE, ...payload.profile });
+    setProfileMeta(payload.profile);
+    setEditingProfile(suggestions.length > 0 || payload.profile.status !== "complete");
     setProfileDirty(false);
   }
 
@@ -196,7 +199,7 @@ export function RealMode({
       });
       if (!response.ok) throw new Error("Не удалось завершить сессию");
       setUser(null);
-      setActiveChatId("");
+      setActiveChatId(""); setChatOpen(false);
       setSelectedNewsId("");
       setProfile(EMPTY_PROFILE);
       setProfileMeta(null);
@@ -212,27 +215,27 @@ export function RealMode({
 
   function scrollToDetail() {
     if (window.matchMedia("(max-width: 860px)").matches) {
-      window.setTimeout(() => detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+      window.setTimeout(() => detailRef.current?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }), 0);
     }
   }
 
   function selectNews(id: string) {
     setSelectedNewsId(id);
-    setActiveChatId("");
+    closeChats();
     scrollToDetail();
   }
 
-  async function openProfileChat(newsId?: string) {
+  async function openProfileChat(newsId?: string, newChat = false) {
     setChatBusy(true); setError("");
     try {
       const csrfToken = await refreshCsrf();
       const response = await fetch("/api/real/chat/sessions", {
         method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
-        body: JSON.stringify(newsId ? { news_id: newsId } : {}),
+        body: JSON.stringify({ news_id: newsId || null, new_chat: newChat }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Не удалось открыть чат");
-      setActiveChatId(data.id as string);
+      selectChat(data.id as string);
       scrollToDetail();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Не удалось открыть чат");
@@ -297,171 +300,11 @@ export function RealMode({
     }
   }
 
-  async function saveProfile(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setProfileBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      const csrfToken = await refreshCsrf();
-      const response = await fetch("/api/real/profile", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
-        body: JSON.stringify(profilePayload(profile)),
-      });
-      const payload = (await response.json().catch(() => null)) as { profile?: SavedProfile; detail?: string; fields?: string[] } | null;
-      if (!response.ok || !payload?.profile) {
-        const fields = payload?.fields?.length ? ` (${payload.fields.join(", ")})` : "";
-        throw new Error(`${payload?.detail || "Не удалось сохранить профиль"}${fields}`);
-      }
-      setProfile({ ...EMPTY_PROFILE, ...payload.profile });
-      setProfileMeta(payload.profile);
-      setProfileDirty(false);
-      const complete = payload.profile.status === "complete";
-      setEditingProfile(!complete);
-      setNotice(complete ? "Профиль сохранён. Подборка новостей обновится под вашу компанию." : "Черновик профиля сохранён. Заполните название и описание, чтобы завершить профиль.");
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Не удалось сохранить профиль");
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    } finally {
-      setProfileBusy(false);
-    }
-  }
-
-  function updateProfile<K extends keyof BusinessProfile>(key: K, value: BusinessProfile[K]) {
-    setProfile((current) => ({ ...current, [key]: value }));
-    setProfileDirty(true);
-  }
-
-  function returnToNews() {
-    if (profileDirty && !window.confirm("Есть несохранённые изменения профиля. Отменить их?")) return;
-    if (profileDirty && profileMeta) setProfile({ ...EMPTY_PROFILE, ...profileMeta });
+  function navigateFromProfile(action: () => void) {
+    if (profileBusy) return;
+    if (profileDirty && !window.confirm("Есть несохранённые изменения профиля. Выйти без сохранения?")) return;
     setProfileDirty(false);
-    setEditingProfile(false);
-  }
-
-  async function analyzeWebsite() {
-    if (!siteConsent || profileDirty || !profile.website) return;
-    setSiteBusy(true);
-    setError("");
-    setNotice("");
-    setSiteWarnings([]);
-    setSiteScanPages([]);
-    setSiteScanned(false);
-    try {
-      const csrfToken = await refreshCsrf();
-      const response = await fetch("/api/real/profile/site-analysis", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
-        body: JSON.stringify({ consent: true }),
-      });
-      const payload = (await response.json().catch(() => null)) as {
-        status?: string; profile?: SavedProfile | null; filled_fields?: string[]; suggestions?: SiteSuggestion[];
-        warnings?: string[]; pages_scanned?: number; pages?: { title: string; url: string }[];
-        opened_url?: string; detail?: string;
-      } | null;
-      if (!response.ok || !payload) throw new Error(payload?.detail || "Не удалось проанализировать сайт");
-      setSiteSuggestions(payload.suggestions ?? []);
-      setSiteWarnings(payload.warnings ?? []);
-      setSiteScanPages(payload.pages ?? []);
-      setSiteScanned(true);
-      if (payload.profile) {
-        setProfile({ ...EMPTY_PROFILE, ...payload.profile });
-        setProfileMeta(payload.profile);
-        setProfileDirty(false);
-        setEditingProfile(true);
-      }
-      const count = (payload.suggestions ?? []).length;
-      const opened = payload.opened_url ? ` Сайт перенаправил на ${payload.opened_url}.` : "";
-      setNotice(count
-        ? `Изучено страниц: ${payload.pages_scanned ?? 0}. Найдено предложений: ${count}. Проверьте источники и подтвердите подходящие значения.${opened}`
-        : payload.pages_scanned
-          ? `Изучено страниц: ${payload.pages_scanned}. Новых подтверждаемых сведений для пустых полей не найдено.${opened}`
-          : "Не удалось найти страницы с доступным текстом.");
-      setSiteConsent(false);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Не удалось проанализировать сайт");
-    } finally {
-      setSiteBusy(false);
-    }
-  }
-
-  async function acceptAllSiteSuggestions() {
-    if (profileDirty || !siteSuggestions.length) return;
-    setSiteBusy(true);
-    setError("");
-    try {
-      const csrfToken = await refreshCsrf();
-      const response = await fetch("/api/real/profile/suggestions/apply", {
-        method: "POST", headers: { "X-CSRF-Token": csrfToken },
-      });
-      const payload = (await response.json().catch(() => null)) as {
-        profile?: SavedProfile; filled_fields?: string[]; suggestions?: SiteSuggestion[];
-        sources?: SiteSuggestion[]; detail?: string;
-      } | null;
-      if (!response.ok || !payload?.profile) throw new Error(payload?.detail || "Не удалось заполнить профиль");
-      setProfile({ ...EMPTY_PROFILE, ...payload.profile });
-      setProfileMeta(payload.profile);
-      setSiteSuggestions(payload.suggestions ?? []);
-      setProfileSources(payload.sources ?? []);
-      const fields = (payload.filled_fields ?? []).map((field) => PROFILE_FIELD_LABELS[field] ?? field);
-      setNotice(fields.length
-        ? `Подтверждены и записаны: ${fields.join(", ")}. Проверьте результат перед продолжением.`
-        : "Свободных полей для применения предложений больше нет.");
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Не удалось подтвердить предложения");
-    } finally {
-      setSiteBusy(false);
-    }
-  }
-
-  async function decideSuggestion(suggestion: SiteSuggestion, accept: boolean) {
-    if (profileDirty) {
-      setError("Сначала сохраните или отмените изменения профиля.");
-      return;
-    }
-    setSiteBusy(true);
-    setError("");
-    try {
-      const csrfToken = await refreshCsrf();
-      const response = await fetch("/api/real/profile/suggestions/decision", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
-        body: JSON.stringify({
-          field_name: suggestion.field_name,
-          source_url: suggestion.source_url,
-          accept,
-        }),
-      });
-      const payload = (await response.json().catch(() => null)) as {
-        status?: string; profile?: SavedProfile | null; suggestions?: SiteSuggestion[];
-        sources?: SiteSuggestion[]; detail?: string;
-      } | null;
-      if (!response.ok || !payload) throw new Error(payload?.detail || "Не удалось сохранить решение");
-      setSiteSuggestions(payload.suggestions ?? []);
-      setProfileSources(payload.sources ?? []);
-      if (payload.profile) {
-        setProfile({ ...EMPTY_PROFILE, ...payload.profile });
-        setProfileMeta(payload.profile);
-      }
-      setNotice(accept ? "Значение подтверждено и добавлено в профиль." : "Предложение отклонено.");
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Не удалось сохранить решение");
-    } finally {
-      setSiteBusy(false);
-    }
-  }
-
-  function suggestionLabel(field: string, value: string | string[]): string {
-    if (!Array.isArray(value)) return value;
-    const options = field === "industry_tags" ? profileOptions.industry_tags : [];
-    return value.map((id) => options.find((item) => item.id === id)?.label ?? id).join(", ");
-  }
-
-  function toggleTag(key: "industry_tags" | "focus_topics", id: string, checked: boolean) {
-    const current = profile[key];
-    updateProfile(key, checked ? [...current, id] : current.filter((item) => item !== id));
+    action();
   }
 
   /* ───── производные данные для ленты ───── */
@@ -472,12 +315,7 @@ export function RealMode({
   const feedItems = newsItems.filter((item) => {
     if (feedTab === "personal" && !item.analysis?.relevant) return false;
     if (feedCategory !== "all" && item.event_type !== feedCategory) return false;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const publishedDate = new Date(`${item.published_at}T00:00:00`);
-    const ageCalendarDays = Math.floor((today.getTime() - publishedDate.getTime()) / 86400000);
-    if (feedPeriod === "day" && ageCalendarDays > 0) return false;
-    if (feedPeriod === "three_days" && ageCalendarDays > 2) return false;
+    if (!inNewsPeriod(item.published_at, feedPeriod)) return false;
     const query = feedQuery.trim().toLocaleLowerCase("ru-RU");
     return !query || `${item.title} ${item.excerpt} ${item.source}`.toLocaleLowerCase("ru-RU").includes(query);
   });
@@ -485,19 +323,18 @@ export function RealMode({
   const personalCount = newsItems.filter((item) => item.analysis?.relevant).length;
   const selectedItem = newsItems.find((item) => item.id === selectedNewsId) ?? feedItems[0] ?? null;
   const analysisRunning = Boolean(realFeed?.job && ["queued", "running"].includes(realFeed.job.status));
-  const filtersActive = feedCategory !== "all" || feedPeriod !== "window";
   const profileComplete = profileMeta?.status === "complete";
 
   /* ───── общие куски разметки ───── */
 
   const header = (
     <header className="bank-bar">
-      <button className="bar-button" type="button" onClick={onHome}>Альфа-Бизнес</button>
-      <ModeSwitch mode={mode} onChange={onModeChange} />
+      <button className="bar-button" type="button" onClick={() => navigateFromProfile(onHome)}>Альфа-Бизнес</button>
+      <ModeSwitch mode={mode} onChange={(next) => navigateFromProfile(() => onModeChange(next))} />
       {user ? (
         <div className="bar-user">
           <span>{user.login}</span>
-          <button className="bar-button bar-small" type="button" onClick={() => void logout()} disabled={busy || profileBusy}>
+          <button className="bar-button bar-small" type="button" onClick={() => navigateFromProfile(() => void logout())} disabled={busy || profileBusy}>
             {busy ? "Выходим…" : "Выйти"}
           </button>
         </div>
@@ -584,54 +421,12 @@ export function RealMode({
     return (
       <div className="bank real">
         {header}
-        <main className="bank-main form-main">
-          <div className="real-head">
-            <div>
-              <h1>Профиль компании</h1>
-              <p className="session-line">
-                {profileMeta ? `${profileComplete ? "Профиль заполнен" : "Профиль заполнен частично"} · версия ${profileMeta.profile_version}` : "Расскажите о компании"}
-              </p>
-            </div>
-            <div className="real-head-actions">
-              <button type="button" className="btn btn-ghost" onClick={returnToNews}>← К новостям</button>
-            </div>
-          </div>
-          {banners}
-          {siteScanned ? (
-            <section className="card site-scan-result" aria-live="polite">
-              <div className="site-scan-result-heading">
-                <div>
-                  <p className="eyebrow">Аудит сайта</p>
-                  <h2>Изучено страниц: {siteScanPages.length}</h2>
-                  <p className="hint small">Модель получает текст только этих публичных страниц. Совпадения сохраняются как предложения для проверки.</p>
-                </div>
-                <span className="chip chip-mid">Предложений: {siteSuggestions.length}</span>
-              </div>
-              {siteScanPages.length > 0 ? (
-                <details>
-                  <summary>Какие страницы использованы</summary>
-                  <ul className="site-scanned-pages">
-                    {siteScanPages.map((page) => (
-                      <li key={page.url}>
-                        <a href={page.url} target="_blank" rel="noreferrer">{page.title || page.url}</a>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              ) : <p className="hint">Проверьте адрес сайта, доступность страниц и ограничения robots.txt.</p>}
-            </section>
-          ) : null}
-          <SuggestionsPanel
-            suggestions={siteSuggestions} warnings={siteWarnings} busy={siteBusy} dirty={profileDirty}
-            label={suggestionLabel} fieldLabels={PROFILE_FIELD_LABELS}
-            onDecide={(suggestion, accept) => void decideSuggestion(suggestion, accept)}
-            onAcceptAll={() => void acceptAllSiteSuggestions()}
-          />
-          <ProfileSourcesPanel sources={profileSources} profile={profile} fieldLabels={PROFILE_FIELD_LABELS} label={suggestionLabel} />
-          <ProfileForm
-            profile={profile} options={profileOptions} busy={profileBusy} dirty={profileDirty}
-            siteConsent={siteConsent} siteBusy={siteBusy} onConsent={setSiteConsent} onAnalyzeSite={() => void analyzeWebsite()}
-            onChange={updateProfile} onToggleTag={toggleTag} onSubmit={(event) => void saveProfile(event)}
+        <main className="bank-main company-profile-main">
+          <CompanyProfile
+            mode="real" apiBase="/api/real/profile" initialProfile={profileMeta}
+            onBack={() => { setEditingProfile(false); setProfileDirty(false); }}
+            onDirtyChange={setProfileDirty} onBusyChange={setProfileBusy}
+            onSaved={(saved) => { setProfile({ ...EMPTY_PROFILE, ...saved }); setProfileMeta(saved); }}
           />
         </main>
       </div>
@@ -641,24 +436,16 @@ export function RealMode({
   /* ───── главный экран: лента + разбор ───── */
 
   return (
-    <div className="bank real">
+    <div className="bank real news-page">
       {header}
       <main className="bank-main">
-        <div className="real-head">
-          <div>
-            <h1>Что важно для вашей компании</h1>
-            <p className="session-line">
-              {profile.company_name || user.login}
-              {profileMeta ? ` · ${profileComplete ? "профиль заполнен" : "профиль заполнен частично"}` : ""}
-            </p>
-          </div>
-          <div className="real-head-actions">
+        <NewsPageHeader company={profile.company_name || user.login}
+          context={profileComplete ? "Подборка с учётом профиля компании" : "Заполните профиль для персональной подборки"}
+          actions={<>
             <button type="button" className="btn btn-ghost" onClick={() => setEditingProfile(true)}>Профиль компании</button>
-            <button type="button" className="btn btn-primary" onClick={() => void openProfileChat()} disabled={chatBusy}>
-              {chatBusy ? "Открываем чат…" : "Спросить о бизнесе"}
-            </button>
-          </div>
-        </div>
+            <button type="button" className="btn btn-ghost" onClick={() => { setChatOpen(true); scrollToDetail(); }}>Мои чаты</button>
+          </>}
+        />
         {banners}
         {!profileComplete ? (
           <div className="nudge">
@@ -667,67 +454,30 @@ export function RealMode({
           </div>
         ) : null}
 
-        <div className="workspace real-workspace">
-          <section className="card feed-card" aria-label="Новости">
-            <div className="seg-tabs" role="tablist" aria-label="Какие новости показывать">
-              <button type="button" role="tab" aria-selected={feedTab === "personal"} onClick={() => setFeedTab("personal")}>Для вас{realFeed ? <span className="count">{personalCount}</span> : null}</button>
-              <button type="button" role="tab" aria-selected={feedTab === "all"} onClick={() => setFeedTab("all")}>Все новости{realFeed ? <span className="count">{allItems.length}</span> : null}</button>
-            </div>
-
-            {realFeed ? (
-              <p className="hint small">
-                {feedTab === "personal"
-                  ? "Новости, у которых нашлась понятная связь с вашей компанией. "
-                  : "Все свежие официальные публикации. "}
-                За последние {realFeed.lookback_days} дн.
-              </p>
-            ) : <p className="hint">Загружаем ленту…</p>}
-
-            {analysisRunning ? <p className="status-line" role="status">Подбираем новости под вашу компанию… осталось {realFeed?.pending_count ?? 0}</p> : null}
-            {!analysisRunning && realFeed && realFeed.pending_count > 0 ? (
-              <p className="status-line" role="status">Появились новые материалы: {realFeed.pending_count}. Обновите подборку, чтобы увидеть связь с вашей компанией.</p>
-            ) : null}
-            {realFeed?.job?.status === "failed" ? <p className="inline-error">Последний анализ завершился с ошибкой. Попробуйте запустить ещё раз.</p> : null}
-
-            <div className="feed-tools">
-              <input className="input" type="search" value={feedQuery} onChange={(event) => setFeedQuery(event.target.value)} placeholder="Поиск по теме или источнику" aria-label="Поиск по новостям" />
-              <button type="button" className="btn btn-ghost" onClick={() => void analyzeNewsNow()} disabled={feedBusy || analysisRunning}>
-                {feedBusy ? "Ставим в очередь…" : "Обновить подборку"}
-              </button>
-            </div>
-            <details className="filters" open={filtersActive}>
-              <summary>Фильтры{filtersActive ? " · включены" : ""}</summary>
-              <div className="filters-grid">
-                <label className="field"><span className="field-label">Категория</span>
-                  <select className="input" value={feedCategory} onChange={(event) => setFeedCategory(event.target.value)}>
-                    <option value="all">Все категории</option>
-                    {feedCategories.map(([category, title]) => <option key={category} value={category}>{title}</option>)}
-                  </select>
-                </label>
-                <label className="field"><span className="field-label">Период</span>
-                  <select className="input" value={feedPeriod} onChange={(event) => setFeedPeriod(event.target.value)}>
-                    <option value="window">Весь период ({realFeed?.lookback_days ?? 3} дн.)</option>
-                    <option value="day">Сегодня</option>
-                    <option value="three_days">3 дня</option>
-                  </select>
-                </label>
-              </div>
-            </details>
-
-            <NewsList
-              items={feedItems} selectedId={selectedItem?.id ?? ""} onSelect={selectNews}
-              emptyText={!realFeed ? "" : feedTab === "personal"
-                ? (personalCount === 0 && allItems.length > 0 ? "Пока нет новостей со связью с вашей компанией. Нажмите «Обновить подборку» или загляните во «Все новости»." : "По вашему запросу ничего не найдено.")
-                : "За выбранный период нет сохранённых новостей из подключённых источников."}
-            />
-          </section>
+        <div className={`workspace real-workspace${chatOpen ? " has-chat" : ""}`}>
+          <NewsFeedPanel personal={feedTab === "personal"} onPersonal={(personal) => setFeedTab(personal ? "personal" : "all")}
+            personalCount={personalCount} totalCount={newsItems.length}
+            query={feedQuery} onQuery={setFeedQuery} category={feedCategory} onCategory={setFeedCategory} categories={feedCategories}
+            period={feedPeriod} onPeriod={setFeedPeriod} periodLabel={`Весь период (${realFeed?.lookback_days ?? 3} дн.)`}
+            onRefresh={() => { if (realFeed) void analyzeNewsNow(); else { setError(""); setFeedRefreshKey((value) => value + 1); } }} refreshing={feedBusy || analysisRunning} loading={!realFeed && !error}
+            error={!realFeed ? error : undefined}
+            status={<>
+              {analysisRunning ? <p className="status-line" role="status">Подбираем новости… осталось {realFeed?.pending_count ?? 0}</p> : null}
+              {!analysisRunning && Boolean(realFeed?.pending_count) ? <p className="status-line">Новых материалов: {realFeed?.pending_count}. Обновите подборку для оценки связи.</p> : null}
+              {realFeed?.job?.status === "failed" ? <p className="inline-error" role="alert">Анализ не завершён. Попробуйте обновить подборку.</p> : null}
+            </>}
+            items={feedItems.map((item) => ({ id: item.id, title: item.title, date: item.published_at,
+              category: item.event_title, source: item.source, excerpt: item.excerpt, score: item.analysis?.score,
+              relevance: item.analysis?.relevant ? relevanceInfo(item.analysis.score) : null }))}
+            selectedId={selectedItem?.id ?? ""} onSelect={selectNews}
+            emptyText={feedTab === "personal" ? "Пока нет новостей со связью с компанией. Обновите подборку или откройте все новости." : "За выбранный период нет сохранённых публикаций."}
+          />
 
           <section className="card real-detail" ref={detailRef} aria-label="Разбор">
-            {activeChatId ? (
-              <ChatPanel
-                sessionId={activeChatId} csrf={csrf} companyName={profile.company_name}
-                onBack={() => setActiveChatId("")} backLabel={selectedItem ? "К новости" : "К новостям"}
-              />
+            {chatOpen ? (
+              <ChatWorkspace activeId={activeChatId} ownerId={user.id} csrf={csrf} companyName={profile.company_name}
+                onSelect={selectChat} onCreate={() => void openProfileChat(undefined, true)}
+                onBack={closeChats} creating={chatBusy} />
             ) : selectedItem ? (
               <NewsDetail
                 item={selectedItem} reportBusy={newsReportBusy === selectedItem.id} chatBusy={chatBusy}
@@ -735,7 +485,7 @@ export function RealMode({
                 onChat={() => void openProfileChat(selectedItem.id)}
               />
             ) : (
-              <p className="empty">{realFeed ? "Выберите новость слева — здесь появится, что она значит для вашей компании." : "Загружаем…"}</p>
+              <NewsState loading={!realFeed && !error} title={realFeed ? "Выберите новость" : error ? "Новости недоступны" : "Загружаем новости"} text="Откройте публикацию в ленте — здесь появятся факты, оценка влияния и возможные действия." />
             )}
           </section>
         </div>

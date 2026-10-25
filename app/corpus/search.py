@@ -9,6 +9,7 @@ import yaml
 from pydantic import BaseModel, ValidationError, model_validator
 from rank_bm25 import BM25Okapi
 
+from app.news_topics import classify as classify, news_topic
 from app.db import ROOT
 from app.ingest.bank_documents import IngestedDocument
 
@@ -148,36 +149,6 @@ def load_bank_documents(folder: Path | None = None) -> list[BankDocument]:
     return documents
 
 
-def classify(text: str, taxonomy: dict | None = None) -> str:
-    """Точные триггеры задают категорию. При равном числе совпадений или без свидетельств — «неизвестно»."""
-    payload = taxonomy or _taxonomy()
-    rules = payload["event_types"]
-    settings = payload.get("classification") or {}
-    unknown = str(settings.get("unknown") or "unknown")
-    min_broad = int(settings.get("min_broad_hits") or 2)
-    haystack = _fold(text)
-    candidates: list[tuple[int, int, str]] = []
-    for event_type, spec in rules.items():
-        if event_type == unknown:
-            continue
-        specific = 0
-        broad = 0
-        for trigger in spec.get("triggers") or []:
-            kind = _trigger_hit(trigger, haystack)
-            if kind == "broad":
-                broad += 1
-            elif kind == "specific":
-                specific += 1
-        if specific == 0 and broad < min_broad:
-            continue
-        candidates.append((specific, int(spec.get("priority") or 0), event_type))
-    if not candidates:
-        return unknown
-    candidates.sort(reverse=True)
-    best_hits, _priority, best_id = candidates[0]
-    if len(candidates) > 1 and candidates[1][0] == best_hits:
-        return unknown
-    return best_id
 
 
 def search_news(
@@ -265,21 +236,6 @@ def _taxonomy() -> dict:
     return yaml.safe_load((ROOT / "config" / "taxonomy.yaml").read_text(encoding="utf-8"))
 
 
-def _trigger_hit(trigger: str | dict, haystack: str) -> str | None:
-    """specific — точный триггер, broad — общий, None — совпадения нет."""
-    if isinstance(trigger, str):
-        return "specific" if _fold(trigger) in haystack else None
-    kind = "broad" if trigger.get("broad") else "specific"
-    parts = trigger.get("all")
-    if isinstance(parts, list):
-        folded = [_fold(str(part)) for part in parts]
-        if folded and all(part and part in haystack for part in folded):
-            return kind
-        return None
-    phrase = _fold(str(trigger.get("phrase") or trigger.get("text") or ""))
-    if phrase and phrase in haystack:
-        return kind
-    return None
 
 
 def _read_news(path: Path) -> dict:
@@ -302,8 +258,12 @@ def _news_record(raw: dict, today: date, taxonomy: dict) -> NewsItem | None:
     identifier = str(raw.get("id") or "").strip()
     if not identifier or not title or not body or not _news_url(url) or not _news_date(published):
         return None
-    event_type = classify(f"{title} {body}", taxonomy)
-    spec = taxonomy["event_types"].get(event_type or "", {})
+    # Imported rows and current fixtures already carry shared, persisted metadata.
+    # Legacy JSON without metadata remains readable for offline corpora.
+    event_type = str(raw.get("event_type") or "").strip()
+    event_title = str(raw.get("event_title") or "").strip()
+    if not event_type or not event_title:
+        event_type, event_title = news_topic(title, body, taxonomy)
     published_on = date.fromisoformat(published)
     return NewsItem(
         id=identifier,
@@ -312,7 +272,7 @@ def _news_record(raw: dict, today: date, taxonomy: dict) -> NewsItem | None:
         published_at=published,
         excerpt=body,
         event_type=event_type,
-        event_title=spec.get("title"),
+        event_title=event_title,
         source=str(raw["source"]).strip() if raw.get("source") else None,
         loaded_at=str(raw["loaded_at"]).strip() if raw.get("loaded_at") else None,
         status=str(raw.get("status") or "demo"),

@@ -95,7 +95,9 @@ def test_fallback_for_a_sparse_profile_still_gives_conclusions(monkeypatch):
 
     assert report is not None and report["origin"] == "rules"
     assert not _is_placeholder(report["risks"]) and not _is_placeholder(report["opportunities"])
-    assert "профиль" in report["relevance"].lower()
+    assert "если" in report["relevance"].lower()
+    assert "мало" not in report["relevance"].lower()
+    assert "заполн" not in report["relevance"].lower()
 
 
 def test_report_adds_the_news_reference_and_keeps_grounding_for_numbers(monkeypatch):

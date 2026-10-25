@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from app.profile.real_taxonomy import REAL_PROFILE_TAXONOMY
 from app.user_store import connect_app, init_app_db, now_utc
 
-BASE_SCORING_VERSION = "real-llm-v3"
+BASE_SCORING_VERSION = "real-llm-v5"
 
 
 def scoring_version() -> str:
@@ -61,7 +61,7 @@ GENERIC_PROFILE_TERMS = {
 
 
 def article_hash(item) -> str:
-    content = "\n".join((item.title, item.url, item.published_at, item.excerpt, item.source or ""))
+    content = "\n".join((item.title, item.url, item.published_at, item.excerpt, item.source or "", item.event_type or ""))
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
@@ -129,9 +129,28 @@ def evaluate(profile: dict, item) -> dict:
                 continue
             add("focus", 0.68, f"Отслеживаемая тема профиля: {TOPIC_LABELS.get(topic, topic)}")
             break
+    products = {
+        "product_credit": ("credit_interest", "кредитные продукты"),
+        "product_deposit": ("deposit_interest", "депозиты"),
+        "product_leasing": ("leasing_interest", "лизинг"),
+        "product_guarantees": ("guarantees_interest", "банковские гарантии"),
+        "product_factoring": ("factoring_interest", "факторинг"),
+        "product_rko": ("settlements_interest", "расчётно-кассовое обслуживание"),
+        "product_payroll": ("settlements_interest", "зарплатный проект"),
+        "customs_activity": ("export_import_interest", "операции в данных ФТС"),
+    }
+    for field, (interest, title) in products.items():
+        if profile.get(field) == "yes" and event in INTEREST_EVENT_MAP[interest]:
+            add("bank_need", 0.72, f"По данным профиля у компании есть {title}")
+            break
     for field, topics in INTEREST_EVENT_MAP.items():
         if profile.get(field) == "interested" and event in topics:
             add("bank_need", 0.64, f"Указан {INTEREST_LABELS[field]}")
+            break
+    for counterparty in profile.get("counterparties", []):
+        name = str(counterparty.get("client_id") or "").strip()
+        if len(name) >= 6 and _has_phrase(text, name.casefold().replace("ё", "е")):
+            add("counterparty", 0.78, f"Упомянут контрагент из платёжных связей: {name}")
             break
     for tag in profile.get("industry_tags", []):
         if event in INDUSTRY_EVENT_MAP.get(tag, set()):
@@ -144,6 +163,7 @@ def evaluate(profile: dict, item) -> dict:
         str(value).strip() for value in [
             profile.get("country"), profile.get("region"), profile.get("city"),
             *(profile.get("market_geographies") or []),
+            *re.split(r"[,;]", profile.get("customs_countries") or ""),
         ]
         if value and len(str(value).strip()) >= 5
         and str(value).strip().casefold() not in {"россия", "российская федерация", "весь мир"}
@@ -196,7 +216,25 @@ def calibrate_model_result(profile: dict, item, model: dict | None) -> dict:
     if not 0 <= score <= 1:
         return baseline
     if baseline["score"] < WEAK_LINK:
-        # A model cannot promote an unsupported category match to a factual link.
+        # A model may surface a conditional link missed by keyword rules only
+        # with exact, specific anchors in both sources. It cannot make it strong.
+        from app.agent.business_context import company_context
+
+        profile_basis = str(model.get("profile_basis") or "").strip().casefold()
+        news_basis = str(model.get("news_basis") or "").strip().casefold()
+        channel = str(model.get("impact_channel") or "").strip()
+        profile_text = json.dumps(company_context(profile), ensure_ascii=False).casefold()
+        news_text = f"{item.title} {item.excerpt[:850]}".casefold()
+        if (model.get("relevant") is True and score >= CLEAR_LINK
+                and len(profile_basis) >= 12 and profile_basis in profile_text and _specific_terms(profile_basis)
+                and len(news_basis) >= 12 and news_basis in news_text and _specific_terms(news_basis)
+                and len(channel) >= 15):
+            return {
+                "relevant": True, "score": round(min(0.54, 0.30 + 0.24 * score), 3),
+                "reasons": [f"Возможная косвенная связь: {channel[:250]}",
+                            f"По профилю: «{model['profile_basis'][:250]}»; в публикации: «{model['news_basis'][:250]}»"],
+                "method": "Правила + условная оценка модели по фрагментам источников",
+            }
         return baseline
     final_score = round(0.75 * baseline["score"] + 0.25 * score, 3)
     explanation = str((model.get("reasons") or [""])[0]).strip()

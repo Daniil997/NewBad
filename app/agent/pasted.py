@@ -1,11 +1,10 @@
 import hashlib
 from datetime import datetime, timezone
 
-import yaml
-
-from app.corpus.search import NewsItem, classify
-from app.db import ROOT, connect, init_db
+from app.corpus.search import NewsItem
+from app.db import connect, init_db
 from app.ingest.news import clean_article
+from app.news_topics import news_topic
 
 
 def remember_pasted(
@@ -16,9 +15,7 @@ def remember_pasted(
     source: str = "",
 ) -> NewsItem:
     article = clean_article(title, text, url, published_at, source)
-    event_type = classify(f"{article.title} {article.text}")
-    taxonomy = yaml.safe_load((ROOT / "config" / "taxonomy.yaml").read_text(encoding="utf-8"))
-    spec = taxonomy["event_types"].get(event_type or "", {})
+    event_type, event_title = news_topic(article.title, article.text)
     news_id = "pasted-" + hashlib.sha256(f"{article.title}\n{article.text}".encode("utf-8")).hexdigest()[:12]
     item = NewsItem(
         id=news_id,
@@ -27,7 +24,7 @@ def remember_pasted(
         published_at=article.published_at,
         excerpt=article.text,
         event_type=event_type,
-        event_title=spec.get("title"),
+        event_title=event_title,
         source=article.source,
         status="pasted",
     )

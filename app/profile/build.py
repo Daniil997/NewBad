@@ -96,6 +96,11 @@ class ClientSummary(BaseModel):
 
 
 def load_profiles() -> list[ClientProfile]:
+    from app.profile.demo_profiles import overlay_profile
+    return [overlay_profile(profile) for profile in load_original_profiles()]
+
+
+def load_original_profiles() -> list[ClientProfile]:
     if _using_case():
         from app.profile.case_data import load_case_profiles
 
@@ -111,14 +116,16 @@ def load_profiles() -> list[ClientProfile]:
 
 
 def get_profile(client_id: str) -> ClientProfile | None:
+    from app.profile.demo_profiles import overlay_profile
+    original = get_original_profile(client_id)
+    return overlay_profile(original) if original else None
+
+
+def get_original_profile(client_id: str) -> ClientProfile | None:
     if _using_case():
         from app.profile.case_data import case_profile
-
         return case_profile(client_id)
-    for profile in load_profiles():
-        if profile.client_id == client_id:
-            return profile
-    return None
+    return next((profile for profile in load_original_profiles() if profile.client_id == client_id), None)
 
 
 def _using_case() -> bool:

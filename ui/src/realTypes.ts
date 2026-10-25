@@ -1,6 +1,22 @@
 export type User = { id: string; login: string; created_at: string };
 export type Interest = "interested" | "not_relevant" | "unknown";
-export type BusinessProfile = {
+export type Presence = "unknown" | "yes" | "no";
+export type ProfileCounterparty = {
+  client_id: string; direction: "in" | "out"; pay_amt: number | null;
+  pay_cnt: number | null; same_group: boolean | null;
+};
+export type CompanyDetails = {
+  organization_type: string; ownership_form: string; company_age_band: string; client_type: string;
+  key_owner_mark: Presence; annual_revenue: number | null;
+  employees_fns_band: string; employees_spark_band: string; group_id: string;
+  group_size: number | null; group_revenue_rank: number | null; related_person_count: number | null;
+  cohort_key: string; cohort_revenue_share: number | null; okved_theme: string;
+  product_rko: Presence; product_guarantees: Presence; product_credit: Presence;
+  product_leasing: Presence; product_deposit: Presence; product_payroll: Presence;
+  product_factoring: Presence; customs_activity: Presence; customs_countries: string;
+  counterparties: ProfileCounterparty[];
+};
+export type BusinessProfile = CompanyDetails & {
   company_name: string; website: string; country: string; region: string; city: string;
   description: string; description_skipped: boolean; industry: string; okved: string; industry_tags: string[];
   products_services: string; customer_types: string; business_model: string;
@@ -18,7 +34,8 @@ export type SiteSuggestion = {
   source_title: string; extracted_at: string; confidence: number;
 };
 export type ChatCitation = { title: string; url: string; published_at: string; kind: string };
-export type ChatMessage = { role: "user" | "assistant"; text: string; citations: ChatCitation[]; created_at: string };
+export type ChatMessage = { role: "user" | "assistant"; text: string; citations: ChatCitation[]; created_at: string; request_id?: string; request_status?: "pending" | "failed" | "completed" };
+export type ChatSession = { id: string; title: string; focused_news_id: string | null; updated_at: string; message_count: number; preview: string | null };
 export type RealNewsItem = {
   id: string; title: string; published_at: string; excerpt: string; event_type: string;
   event_title: string; source: string; url: string;
@@ -47,9 +64,24 @@ export const PROFILE_FIELD_LABELS: Record<string, string> = {
   description: "Описание бизнеса", industry: "Основная деятельность", industry_tags: "Отраслевые теги",
   products_services: "Товары и услуги", customer_types: "Тип клиентов", business_model: "Модель бизнеса",
   dependencies: "Зависимости бизнеса", market_geographies: "География рынков и поставок",
+  organization_type: "Тип организации", ownership_form: "Форма собственности", company_age_band: "Возраст компании",
+  client_type: "Тип клиента банка", key_owner_mark: "Признак ключевого собственника", annual_revenue: "Годовая выручка",
+  employees_fns_band: "Численность по ФНС", employees_spark_band: "Численность по СПАРК", group_id: "Группа компаний",
+  group_size: "Компаний в группе", group_revenue_rank: "Место по выручке в группе", related_person_count: "Связанные физические лица",
+  cohort_key: "Когорта ОКВЭД", cohort_revenue_share: "Доля выручки в когорте", okved_theme: "Отраслевая тема по ОКВЭД",
+  product_rko: "Расчётно-кассовое обслуживание", product_guarantees: "Банковские гарантии", product_credit: "Кредитные продукты",
+  product_leasing: "Лизинг", product_deposit: "Депозиты", product_payroll: "Зарплатный проект", product_factoring: "Факторинг",
+  customs_activity: "Данные ФТС", customs_countries: "Страны в данных ФТС", counterparties: "Платёжные связи",
 };
 
 export const EMPTY_PROFILE: BusinessProfile = {
+  organization_type: "", ownership_form: "", company_age_band: "", client_type: "",
+  key_owner_mark: "unknown", annual_revenue: null, employees_fns_band: "", employees_spark_band: "",
+  group_id: "", group_size: null, group_revenue_rank: null, related_person_count: null,
+  cohort_key: "", cohort_revenue_share: null, okved_theme: "",
+  product_rko: "unknown", product_guarantees: "unknown", product_credit: "unknown",
+  product_leasing: "unknown", product_deposit: "unknown", product_payroll: "unknown",
+  product_factoring: "unknown", customs_activity: "unknown", customs_countries: "", counterparties: [],
   company_name: "", website: "", country: "", region: "", city: "", description: "",
   description_skipped: false, industry: "", okved: "", industry_tags: [], products_services: "", customer_types: "",
   business_model: "", size_band: "", business_stage: "", credit_interest: "unknown",
