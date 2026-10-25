@@ -255,4 +255,4 @@ node ui/tests/bank-analytics.mjs "<путь к пакету playwright>"
 | `requirements.txt`, `requirements-dev.txt` | Python-зависимости приложения и разработки |
 | `ui/package-lock.json` | Зафиксированные зависимости интерфейса |
 
-Дополнительная документация: [данные](data/README.md), [банковский корпус](data/bank/README.md), [интерфейс](ui/README.md).
+Дополнительная документация: [данные](data/README.md), [банковский корпус](data/bank/README.md), [интерфейс](ui/README.md), [сторонние компоненты и лицензии](THIRD_PARTY_NOTICES.md).
