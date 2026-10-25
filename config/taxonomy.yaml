@@ -20,7 +20,7 @@ event_types:
       - {phrase: ставк, broad: true}
     exposures: [rate_borrower, rate_saver]
     weight: 1.0
-    bank_topics: [key_rate, tactical_q3, bond_brief]
+    bank_topics: [key_rate, strategy, bonds, macro]
   bonds:
     title: Облигации
     priority: 80
@@ -75,7 +75,7 @@ event_types:
       - {phrase: валютн}
     exposures: [fx_exposure]
     weight: 0.9
-    bank_topics: [tactical_q3]
+    bank_topics: [strategy, gold, inflation, macro]
   commodities_energy:
     title: Сырьё и энергоносители
     priority: 70
@@ -86,11 +86,15 @@ event_types:
       - {phrase: газ}
       - {phrase: спг}
       - {phrase: lng}
+      - {phrase: дизел}
+      - {phrase: бензин}
+      - {phrase: топлив}
+      - {phrase: нпз}
       - {phrase: угл}
       - {phrase: сырь, broad: true}
     exposures: [commodity_energy, commodity_metals]
     weight: 0.8
-    bank_topics: [commodities]
+    bank_topics: [inflation, macro]
   metals:
     title: Металлы
     priority: 80
@@ -128,7 +132,7 @@ event_types:
       - {phrase: зарплат}
     exposures: [consumption]
     weight: 0.6
-    bank_topics: [consumption]
+    bank_topics: [consumption, macro]
   regulation_tax:
     title: Регулирование и налоги
     priority: 50
@@ -148,7 +152,7 @@ event_types:
       - {phrase: санкци}
       - {phrase: экспорт}
       - {phrase: импорт}
-      - {phrase: тариф}
+      - {phrase: тариф, broad: true}
       - {phrase: ограничени, broad: true}
     exposures: [foreign_trade, country_exposure, fx_exposure]
     weight: 0.8

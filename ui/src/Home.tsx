@@ -1,16 +1,10 @@
-import { ModeSwitch, type AppMode } from "./ModeSwitch";
+import { DataRefreshButton } from "./DataRefresh";
 import "./home.css";
 
 export function Home({
-  mode,
-  onModeChange,
-  entered,
   onOpen,
   onSettings,
 }: {
-  mode: AppMode;
-  onModeChange: (mode: AppMode) => void;
-  entered: boolean;
   onOpen: () => void;
   onSettings: () => void;
 }) {
@@ -21,7 +15,7 @@ export function Home({
           <strong>Альфа-Бизнес</strong>
           <span>интернет-банк</span>
         </div>
-        <ModeSwitch mode={mode} onChange={onModeChange} />
+        <DataRefreshButton />
       </header>
       <main className="bank-main">
         <h1>Главная</h1>
@@ -43,11 +37,7 @@ export function Home({
           <span className="eyebrow">Сервис</span>
           <strong>Что важно для вашей компании</strong>
           <em>
-            {mode === "real"
-              ? "Войти или зарегистрироваться"
-              : entered
-                ? "Продолжить просмотр"
-                : "Открыть тестовые профили"}
+            Войти или зарегистрироваться
           </em>
         </button>
         <button className="dev-link" type="button" onClick={onSettings}>

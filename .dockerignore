@@ -18,3 +18,6 @@ data/bank/extracted
 data/news/imported
 data/*.sqlite3
 **/*.sqlite3
+**/*.sqlite3-*
+**/*.sqlite3.bak*
+!data/bank/corpus.sqlite3

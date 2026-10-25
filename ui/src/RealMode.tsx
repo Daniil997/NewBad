@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import "./real.css";
 import { CompanyProfile } from "./CompanyProfile";
-import { ModeSwitch, type AppMode } from "./ModeSwitch";
+import { DataRefreshButton } from "./DataRefresh";
 import {
   EMPTY_PROFILE, relevanceInfo,
   type BusinessProfile, type MarketHistory, type RealFeed, type RealMarkets,
@@ -15,12 +15,8 @@ import { ChatWorkspace } from "./ChatWorkspace";
 import { NewsFeedPanel, NewsPageHeader, NewsState, inNewsPeriod } from "./NewsWorkspace";
 
 export function RealMode({
-  mode,
-  onModeChange,
   onHome,
 }: {
-  mode: AppMode;
-  onModeChange: (mode: AppMode) => void;
   onHome: () => void;
 }) {
   const [csrf, setCsrf] = useState("");
@@ -56,6 +52,11 @@ export function RealMode({
   const [newsReportBusy, setNewsReportBusy] = useState("");
   const detailRef = useRef<HTMLElement | null>(null);
   const tabInitialized = useRef(false);
+  useEffect(() => {
+    const refresh = () => { setFeedRefreshKey((key) => key + 1); setMarketHistories({}); };
+    window.addEventListener("business-data-updated", refresh);
+    return () => window.removeEventListener("business-data-updated", refresh);
+  }, []);
 
   async function refreshCsrf(): Promise<string> {
     const response = await fetch("/api/auth/csrf");
@@ -330,7 +331,7 @@ export function RealMode({
   const header = (
     <header className="bank-bar">
       <button className="bar-button" type="button" onClick={() => navigateFromProfile(onHome)}>Альфа-Бизнес</button>
-      <ModeSwitch mode={mode} onChange={(next) => navigateFromProfile(() => onModeChange(next))} />
+      <DataRefreshButton />
       {user ? (
         <div className="bar-user">
           <span>{user.login}</span>
@@ -423,7 +424,7 @@ export function RealMode({
         {header}
         <main className="bank-main company-profile-main">
           <CompanyProfile
-            mode="real" apiBase="/api/real/profile" initialProfile={profileMeta}
+            apiBase="/api/real/profile" initialProfile={profileMeta}
             onBack={() => { setEditingProfile(false); setProfileDirty(false); }}
             onDirtyChange={setProfileDirty} onBusyChange={setProfileBusy}
             onSaved={(saved) => { setProfile({ ...EMPTY_PROFILE, ...saved }); setProfileMeta(saved); }}

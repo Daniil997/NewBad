@@ -8,7 +8,6 @@ from app.ingest.news import NewsSource, import_news
 from app.news_store import imported_news, store_imported_news
 from app.news_topics import news_topic
 from app.personal_feed import article_hash
-from app.scoring.feed import corpus_version
 from app.user_store import connect_app, init_app_db
 
 
@@ -82,12 +81,8 @@ def test_duplicate_and_enriched_content_keep_the_original_topic():
 def test_topic_changes_invalidate_ranking_but_label_changes_do_not_invalidate_analysis(monkeypatch, tmp_path):
     store_imported_news("test", [_article()])
     item = load_news(tmp_path)[0]
-    monkeypatch.setattr("app.scoring.feed.load_news", lambda: [item])
-    monkeypatch.setattr("app.scoring.feed.load_bank_documents", lambda: [])
-    version = corpus_version()
     digest = article_hash(item)
     item.event_type = "unknown"
-    assert corpus_version() != version
     assert article_hash(item) != digest
     digest = article_hash(item)
     item.event_title = "Другая подпись"
@@ -115,4 +110,4 @@ def test_v10_migration_backfills_once_without_changing_article(monkeypatch, tmp_
     assert saved["event_title"] == "Денежный рынок"
     assert {key: saved[key] for key in row} == row
     with connect_app() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 17

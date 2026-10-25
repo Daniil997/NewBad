@@ -90,7 +90,6 @@
 .news-page .news-state h3 { color: #3f4652; font-size: 1rem; margin: 0 0 .5rem; }
 .news-page .news-state p { font-size: .85rem; line-height: 1.6; max-width: 34ch; margin: 0 auto 1rem; }
 .news-page .news-state.is-loading .news-state-icon { animation: news-pulse 1.4s ease-in-out infinite; }
-.news-page .news-demo-actions { margin: 1.25rem .25rem 0; font-size: .8rem; }
 .news-page .news-facts { margin-top: .75rem; }
 .news-page .bank-recommendation blockquote { margin: .75rem 0 0; padding: .75rem 1rem; border-left: 3px solid #ef3124; border-radius: 0 10px 10px 0; background: #fff6f4; font-size: .9rem; line-height: 1.7; }
 .news-page .bank-recommendation-text { white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -10,18 +10,11 @@ services:
     environment:
       LLM_MODE: ${LLM_MODE:-mock}
       ALLOW_CLOUD: ${ALLOW_CLOUD:-false}
-      PROFILE_SOURCE: ${PROFILE_SOURCE:-demo}
       LOCAL_LLM_BASE_URL: ${LOCAL_LLM_BASE_URL:-http://host.docker.internal:8080/v1}
       CASE_LLM_BASE_URL: ${CASE_LLM_BASE_URL:-}
       CASE_LLM_API_KEY: ${CASE_LLM_API_KEY:-}
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
-      DEMO_MODE: ${DEMO_MODE:-true}
-      CASE_DATA_DIR: /srv/input/company_profile
-      BANK_PDF_DIR: /srv/input/bank_analytics
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     volumes:
       - ./data:/srv/data
       - ./config:/srv/config
-      - ../DATA/company_profile:/srv/input/company_profile:ro
-      - ../DATA/bank_analytics:/srv/input/bank_analytics:ro

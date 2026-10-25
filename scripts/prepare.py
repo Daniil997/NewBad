@@ -1,8 +1,4 @@
-"""Подготовка данных.
-
-По умолчанию только проверка демо-набора: без сети, без OCR и без чтения закрытых CSV.
-Импорт новостей и PDF запускается отдельными командами.
-"""
+"""Проверка базы, импорт публикаций и установка банковского корпуса SQLite."""
 
 from __future__ import annotations
 
@@ -18,17 +14,15 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 def check() -> int:
-    news = sorted(path for path in (ROOT / "data" / "news").glob("*.json") if path.name != "import.json")
-    bank = sorted((ROOT / "data" / "bank").glob("*.json"))
-    companies = ROOT / "data" / "demo" / "companies.csv"
-    print(f"демо-компании: {'есть' if companies.is_file() else 'нет'}")
-    print(f"новости: {len(news)}")
-    print(f"паспорта банка: {len(bank)}")
-    if companies.is_file() and news and bank:
-        print("демо-набор на месте, ключ и видеокарта не нужны")
-        return 0
-    print("демо-набор неполный")
-    return 1
+    from app.user_store import init_app_db
+    from app.db import init_db
+    from app.news_store import stored_news_count
+    init_app_db()
+    init_db()
+    print("База готова")
+    print(f"новости: {stored_news_count()}")
+    print("Сбор источников запускается кнопкой «Обновить данные».")
+    return 0
 
 
 def import_rss() -> int:
@@ -55,20 +49,17 @@ def import_rss() -> int:
 
 
 def import_bank() -> int:
-    from app.ingest.bank_documents import ingest_bank_documents
-    from app.profile.sources import bank_pdf_dir
+    from app.bank_store import corpus_status, refresh_all_recommendations
+    from app.user_store import init_app_db
 
-    folder = bank_pdf_dir()
-    if folder is None:
-        print("папка PDF не найдена, импорт банка пропущен")
-        return 1
-    documents = ingest_bank_documents(ROOT / "data" / "bank" / "extracted", folder=folder)
-    print(f"импорт банка: документов {len(documents)}")
+    init_app_db()
+    print(f"корпус банка: {corpus_status()}")
+    print(f"привязки к профилям: {refresh_all_recommendations()}")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Проверка демо-набора и импорт источников")
+    parser = argparse.ArgumentParser(description="Проверка базы и импорт источников")
     parser.add_argument("command", nargs="?", choices=("check", "news", "bank"), default="check")
     args = parser.parse_args(argv)
     if args.command == "news":

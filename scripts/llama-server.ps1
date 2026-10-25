@@ -25,7 +25,7 @@ if ($length -lt 14000000000) {
 
 $smi = & nvidia-smi --query-gpu=name,memory.free --format=csv,noheader,nounits 2>$null
 if ($LASTEXITCODE -ne 0 -or -not $smi) {
-    Write-Host "Дискретной NVIDIA нет. Локальную модель не запускаем, демо идёт из заглушки."
+    Write-Host "Дискретной NVIDIA нет. Локальный сервер не запущен."
     exit 1
 }
 

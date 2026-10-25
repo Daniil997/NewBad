@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-ENV LLM_MODE=mock ALLOW_CLOUD=false PROFILE_SOURCE=demo
+ENV LLM_MODE=mock ALLOW_CLOUD=false
 WORKDIR /srv
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt

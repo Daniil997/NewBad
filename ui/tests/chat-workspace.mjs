@@ -28,6 +28,7 @@ await page.route("**/api/**", async (route) => {
   const method = route.request().method();
   let data;
   if (path === "/api/auth/csrf") data = { csrf_token: "qa-csrf" };
+  else if (path === "/api/data/refresh") data = { status: "idle" };
   else if (path === "/api/auth/me") data = { authenticated: true, user: { id: "qa-owner", login: "qa-owner" } };
   else if (path === "/api/real/profile") data = { profile: { company_name: "Северные перевозки", status: "complete", profile_version: 1 } };
   else if (path === "/api/real/profile/suggestions") data = { suggestions: [] };

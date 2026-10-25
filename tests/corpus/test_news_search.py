@@ -13,7 +13,7 @@ def _write(folder, name: str, payload: dict) -> None:
     (folder / name).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
-def _demo(news_id: str, title: str, excerpt: str, published: str, url: str) -> dict:
+def _article(news_id: str, title: str, excerpt: str, published: str, url: str) -> dict:
     return {
         "id": news_id,
         "url": url,
@@ -23,11 +23,11 @@ def _demo(news_id: str, title: str, excerpt: str, published: str, url: str) -> d
     }
 
 
-def test_demo_and_imported_news_share_one_format(tmp_path):
+def test_file_and_sqlite_import_formats_are_compatible(tmp_path):
     _write(
         tmp_path,
         "rate.json",
-        _demo(
+        _article(
             "rate",
             "Ключевая ставка сохранена",
             "Регулятор оставил ставку без изменения.",
@@ -53,7 +53,7 @@ def test_demo_and_imported_news_share_one_format(tmp_path):
     _write(tmp_path / "imported", "import.json", {"status": "imported", "items": []})
     news = {item.id: item for item in load_news(tmp_path, _TODAY)}
     assert set(news) == {"rate", "cbr-gold"}
-    assert news["rate"].status == "demo"
+    assert news["rate"].status == "imported"
     assert news["rate"].excerpt.startswith("Регулятор")
     imported = news["cbr-gold"]
     assert imported.excerpt == "Цена золота обновила максимум месяца."
@@ -67,7 +67,7 @@ def test_search_uses_title_and_body_and_keeps_url(tmp_path):
     _write(
         tmp_path,
         "title.json",
-        _demo(
+        _article(
             "title-only",
             "Редкийзаголовок без деталей",
             "Короткое сообщение без искомого слова.",
@@ -78,7 +78,7 @@ def test_search_uses_title_and_body_and_keeps_url(tmp_path):
     _write(
         tmp_path,
         "body.json",
-        _demo(
+        _article(
             "body-only",
             "Обычное сообщение",
             "В тексте упоминается редкийабзац и больше ничего.",
@@ -99,7 +99,7 @@ def test_stale_duplicate_and_incomplete_news(tmp_path):
     _write(
         tmp_path,
         "fresh.json",
-        _demo(
+        _article(
             "fresh",
             "Свежая заметка про металл",
             "Свежий обзор рынка металла.",
@@ -110,7 +110,7 @@ def test_stale_duplicate_and_incomplete_news(tmp_path):
     _write(
         tmp_path,
         "old.json",
-        _demo(
+        _article(
             "old",
             "Старая заметка про металл металл металл металл",
             "Старый обзор рынка металла металл металл металл.",
@@ -167,11 +167,3 @@ def test_stale_duplicate_and_incomplete_news(tmp_path):
     with pytest.raises(CorpusError) as error:
         load_news(tmp_path, _TODAY)
     assert error.value.kind == "load"
-
-
-def test_real_rate_news_keeps_its_url_and_date():
-    hits = search_news("ключевая ставка 14%")
-    assert hits[0].id == "cbr-rate-14"
-    assert hits[0].url == "https://www.cbr.ru/press/"
-    assert hits[0].published_at == "2026-09-11"
-    assert hits[0].stale is False

@@ -18,7 +18,7 @@ _ENDING = (
     "иями", "ями", "ами", "ого", "ему", "ому", "ыми", "ими",
     "ее", "ие", "ые", "ое", "ая", "яя", "ой", "ый", "ий", "ых", "их",
     "ах", "ях", "ам", "ям", "ов", "ев", "ом", "ем", "ую", "юю",
-    "а", "я", "ы", "и", "е", "о", "у", "ю",
+    "а", "я", "ы", "и", "е", "о", "у", "ю", "ь",
 )
 _STOP = frozenset(
     "и в во на по с со к ко о об для что это как не ни от за из до при без над под про "
@@ -44,7 +44,7 @@ class NewsItem(BaseModel):
     event_title: str | None
     source: str | None = None
     loaded_at: str | None = None
-    status: str = "demo"
+    status: str = "imported"
     stale: bool = False
 
 
@@ -91,14 +91,10 @@ class CorpusError(Exception):
 
 
 def load_news(folder: Path | None = None, today: date | None = None) -> list[NewsItem]:
-    """Демо-файлы и `imported/*.json` читаются в один формат. Дубли и неполные записи в корпус не входят."""
-    root = folder or (ROOT / "data" / "news")
-    if not root.is_dir():
-        return []
-    paths = sorted(path for path in root.glob("*.json") if path.name != "import.json")
-    imported = root / "imported"
-    if imported.is_dir():
-        paths.extend(path for path in sorted(imported.glob("*.json")) if path.name != "import.json")
+    """Load collected articles from SQLite; an explicit folder supports offline imports."""
+    paths = sorted(path for path in folder.glob("*.json") if path.name != "import.json") if folder else []
+    if folder and (folder / "imported").is_dir():
+        paths.extend(path for path in sorted((folder / "imported").glob("*.json")) if path.name != "import.json")
     taxonomy = _taxonomy()
     current = today or date.today()
     items: list[NewsItem] = []
@@ -137,7 +133,20 @@ def load_news(folder: Path | None = None, today: date | None = None) -> list[New
 
 
 def load_bank_documents(folder: Path | None = None) -> list[BankDocument]:
-    """Паспорта из `data/bank/*.json` и страницы из `extracted/*/pages.json`. Пустые и сбойные страницы не входят."""
+    """SQLite is the live corpus. An explicit folder supports legacy ingestion tests only."""
+    if folder is None:
+        from app.user_store import connect_app
+
+        with connect_app() as connection:
+            rows = connection.execute(
+                "SELECT d.id, d.title, d.published_at, d.topic, p.page, p.text "
+                "FROM bank_pages p JOIN bank_documents d ON d.id=p.document_id "
+                "WHERE length(p.text)>=40 AND d.deleted=0 ORDER BY d.id,p.page"
+            ).fetchall()
+        return [BankDocument(doc_id=row["id"], title=row["title"], published_at=row["published_at"],
+                             topic=row["topic"], page=row["page"], source_type="bank_analytics",
+                             theses=[], text=row["text"], quote=" ".join(row["text"].split()[:25]))
+                for row in rows]
     root = folder or (ROOT / "data" / "bank")
     if not root.is_dir():
         return []
@@ -181,6 +190,19 @@ def search_news(
 
 def search_bank_analytics(query: str, limit: int = 5, folder: Path | None = None) -> list[SearchHit]:
     """Пустой список — совпадений нет. Сломанный файл или индекс поднимают CorpusError, а не пустой ответ."""
+    if folder is None:
+        from app.bank_store import search_passages
+
+        try:
+            matches = search_passages(query, limit=limit)
+        except sqlite3.Error as error:
+            raise CorpusError("load", "Не удалось прочитать банковскую аналитику из SQLite") from error
+        except Exception as error:
+            raise CorpusError("index", f"Индекс банка не построен: {error.__class__.__name__}") from error
+        return [SearchHit(id=row["document_id"], title=row["title"], score=row["score"],
+                          excerpt=row["text"], published_at=row["published_at"], page=row["page"],
+                          event_type=row["topic"], source_type="bank_analytics", stale=row["stale"],
+                          strength="strong" if row["matched_terms"] > 1 else "narrow") for row in matches]
     documents = load_bank_documents(folder)
     content = [token for token in _tokenize(query, stem=True) if token not in _STOP]
     if not content or not documents:
@@ -275,7 +297,7 @@ def _news_record(raw: dict, today: date, taxonomy: dict) -> NewsItem | None:
         event_title=event_title,
         source=str(raw["source"]).strip() if raw.get("source") else None,
         loaded_at=str(raw["loaded_at"]).strip() if raw.get("loaded_at") else None,
-        status=str(raw.get("status") or "demo"),
+        status=str(raw.get("status") or "imported"),
         stale=(today - published_on).days > _STALE_DAYS,
     )
 
@@ -286,7 +308,7 @@ def _news_url(value: str) -> bool:
 
 
 def _article_key(url: str) -> str | None:
-    """Адрес главной страницы не считается идентификатором статьи: у демо-новостей он общий."""
+    """Адрес главной страницы не считается уникальным идентификатором статьи."""
     parsed = urlsplit(url)
     path = parsed.path.rstrip("/")
     if not parsed.query and not path:

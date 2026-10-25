@@ -48,7 +48,7 @@ if (-not (Test-Path -LiteralPath $Python)) {
 if ($LASTEXITCODE -ne 0) { throw "Проекту необходим Python 3.11+." }
 
 # An existing virtual environment may be missing dependencies after git pull.
-& $Python -c "import fastapi, uvicorn, pydantic, httpx, yaml, duckdb, numpy, fitz, rank_bm25"
+& $Python -c "import fastapi, uvicorn, pydantic, httpx, yaml, numpy, fitz, rank_bm25"
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Installing missing Python dependencies"
     & $Python -m pip install -r (Join-Path $Root "requirements-dev.txt")
@@ -56,7 +56,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Prevent starting the frontend against an API with a syntax error.
-& $Python -m compileall -q (Join-Path $Root "app") (Join-Path $Root "config")
+& $Python -m compileall -q (Join-Path $Root "app")
 if ($LASTEXITCODE -ne 0) { throw "В Python-коде обнаружена синтаксическая ошибка. API не запущен." }
 
 $UiDir = Join-Path $Root "ui"

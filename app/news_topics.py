@@ -1,5 +1,7 @@
 """Company-independent news topics, assigned once at import and stored with the article."""
 
+import re
+
 import yaml
 
 from app.db import ROOT
@@ -48,18 +50,27 @@ def classify(text: str, taxonomy: dict | None = None) -> str:
 def _trigger_hit(trigger: str | dict, haystack: str) -> str | None:
     """specific — точный триггер, broad — общий, None — совпадения нет."""
     if isinstance(trigger, str):
-        return "specific" if _fold(trigger) in haystack else None
+        return "specific" if _prefix_phrase(_fold(trigger), haystack) else None
     kind = "broad" if trigger.get("broad") else "specific"
     parts = trigger.get("all")
     if isinstance(parts, list):
         folded = [_fold(str(part)) for part in parts]
-        if folded and all(part and part in haystack for part in folded):
+        if folded and all(part and _prefix_phrase(part, haystack) for part in folded):
             return kind
         return None
     phrase = _fold(str(trigger.get("phrase") or trigger.get("text") or ""))
-    if phrase and phrase in haystack:
+    if phrase and _prefix_phrase(phrase, haystack):
         return kind
     return None
+
+
+def _prefix_phrase(phrase: str, text: str) -> bool:
+    # Stems match at the beginning of words: газ matches газовый, never магазин.
+    if phrase == "газ":
+        return bool(re.search(r"\bгаз(?:а|у|ом|е|ов\w*)?\b", text))
+    if phrase == "сталь":
+        return bool(re.search(r"\bсталь\w*|северсталь|(?:потреблен|производ|выпуск|цен|рын|прокат|экспорт|импорт)\w*(?:\W+\w+){0,2}\W+стали\b", text))
+    return bool(phrase and re.search(r"(?<!\w)" + re.escape(phrase), text))
 
 
 def news_topic(title: str, text: str, taxonomy: dict | None = None) -> tuple[str, str]:
@@ -71,6 +82,10 @@ def news_topic(title: str, text: str, taxonomy: dict | None = None) -> tuple[str
     payload = taxonomy or load_taxonomy()
     unknown = str((payload.get("classification") or {}).get("unknown") or "unknown")
     event_type = classify(title, payload)
+    if (event_type == unknown and "monetary_policy" in payload["event_types"]
+            and re.search(r"заявление.*банка россии.*заседания", _fold(title))
+            and re.search(r"ключев\w* ставк", _fold(text))):
+        event_type = "monetary_policy"
     if event_type == unknown:
         event_type = classify(f"{title} {text}", payload)
     label = payload["event_types"].get(event_type, {}).get("title")

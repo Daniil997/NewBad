@@ -163,7 +163,8 @@ def test_catalog_diagnostics_distinguish_age_from_invalid_news(tmp_path, monkeyp
 
     fresh = date.today()
     old = fresh - timedelta(days=40)
-    formatted = lambda day: day.strftime("%a, %d %b %Y 12:00:00 +0300")
+    def formatted(day):
+        return day.strftime("%a, %d %b %Y 12:00:00 +0300")
     xml = feed(
         item("Старое решение Банка России", formatted(old), 27),
         item("Актуальное решение Банка России", formatted(fresh), 28),

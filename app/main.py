@@ -15,27 +15,24 @@ from threading import Lock
 from typing import Literal
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
 from app.agent.business_context import conversation_evidence, profile_evidence
+from app.bank_store import add_text_material, bank_evidence, context_hash, corpus_status, delete_material, ensure_recommendations, evidence_citations, matching_version, search_passages, selected_evidence
 from app.chat_store import fail_turn, finish_turn, recover_stale_turns, start_turn
-from app.agent.chat import ChatReply, answer_from_card
 from app.agent.failure import failure_detail
+from app.agent.source_references import clean_source_references, display_report
 from app.agent.generate import analyze_profile_news, answer_profile_chat, select_profile_news
-from app.agent.loop import build_card
-from app.agent.pasted import remember_pasted
 from app.corpus.search import (
     CorpusError,
-    SearchHit,
     load_bank_documents,
     load_news,
-    search_bank_analytics,
     search_news,
 )
-from app.db import ROOT, connect, init_db, journal_is_empty, journal_tables
+from app.db import ROOT, init_db, journal_is_empty, journal_tables
 from app.ingest.news import import_news_catalog, load_news_sources, migrate_legacy_imports
 from app.news_store import (
     bank_recommendations, clear_stored_news, prune_stored_news, recent_news_count,
@@ -80,23 +77,16 @@ from app.user_store import (
     user_for_session,
     now_utc,
 )
-from app.profile.build import ClientProfile, ClientSummary, get_profile, get_original_profile, load_profiles
-from app.profile.demo_profiles import demo_profile_context, invalidate_demo_feed
 from app.profile.details import ExtendedProfile
 from app.profile.real_taxonomy import REAL_PROFILE_TAXONOMY
 from app.profile.site_crawler import SiteFetchError, crawl_site
 from app.profile.site_extract import SiteExtractionError, extract_profile_suggestions
-from app.schemas.card import Card
-from app.scoring.feed import Feed, build_feed
 from app.llm.placement import decide, placement_label
 from app.llm.router import current_route, local_status, resolve_route
-from app.agent.tools import find_news
-from app.tracing.journal import latest_steps, read_trace
 
 logger = logging.getLogger(__name__)
 
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$")
-_QUERY_LIMIT = 300
 _SESSION_COOKIE = "newbad_session"
 _CSRF_COOKIE = "newbad_csrf"
 _LOGIN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$")
@@ -107,6 +97,9 @@ _PASSWORD_SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 async def lifespan(_app: FastAPI):
     init_db()
     init_app_db()
+    from app.news_store import refresh_news_topics
+
+    refresh_news_topics()
     prune_insight_snapshots(developer_settings()["insight_retention_days"])
     scheduler = asyncio.create_task(_news_scheduler())
     market_scheduler = asyncio.create_task(_market_scheduler())
@@ -161,40 +154,6 @@ def data_unavailable(_request: Request, _exc: FileNotFoundError) -> JSONResponse
     return JSONResponse(status_code=503, content={"detail": "Данные компаний недоступны"})
 
 
-@app.get("/api/clients")
-def clients() -> list[ClientSummary]:
-    return [
-        ClientSummary(
-            client_id=profile.client_id,
-            title=profile.title,
-            money_role=profile.money_role,
-            exposure_ids=[item.id for item in profile.exposures],
-        )
-        for profile in load_profiles()
-    ]
-
-
-@app.get("/api/clients/{client_id}/feed")
-def client_feed(client_id: str) -> Feed:
-    _check_id(client_id, "компании")
-    feed = build_feed(client_id)
-    if feed is None:
-        raise HTTPException(status_code=404, detail="Компания не найдена")
-    return feed
-
-
-class PasteNews(BaseModel):
-    title: str = Field(min_length=1, max_length=500)
-    text: str = Field(min_length=1, max_length=8000)
-    url: str = Field(default="", max_length=2000)
-    published_at: str = Field(default="", max_length=40)
-    source: str = Field(default="", max_length=200)
-
-
-class ChatQuestion(BaseModel):
-    question: str = Field(min_length=1, max_length=2000)
-
-
 class ProfileChatStart(BaseModel):
     new_chat: bool = False
     news_id: str | None = Field(default=None, max_length=120)
@@ -211,10 +170,6 @@ class ProfileChatRename(BaseModel):
 
 class ProfileNewsReportRequest(BaseModel):
     refresh: bool = False
-
-
-class Feedback(BaseModel):
-    helpful: bool
 
 
 class Credentials(BaseModel):
@@ -380,7 +335,7 @@ class SettingsUpdate(BaseModel):
     @field_validator("task_routes")
     @classmethod
     def valid_task_routes(cls, values: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
-        expected = {"real": {"profile_site", "news_report", "news_selection", "chat"}, "demo": {"news_card", "news_card_fact", "news_card_copy", "chat"}}
+        expected = {"real": {"profile_site", "news_report", "news_selection", "chat"}}
         allowed = {"mock", "local_gemma", "local_qwen", "cloud_gemma", "cloud_glm", "cloud_qwen", "cloud_deepseek", "cloud_vl", "cloud_kimi"}
         if not values:
             return values
@@ -394,6 +349,57 @@ class SettingsUpdate(BaseModel):
 
 _PLACEMENTS = {"auto", "gpu", "ram"}
 _NEWS_COLLECTION_LOCK = Lock()
+_DATA_REFRESH_LOCK = Lock()
+_DATA_REFRESH_STATE: dict = {"status": "idle", "message": ""}
+
+
+@app.get("/api/data/refresh")
+def data_refresh_status() -> dict:
+    return _DATA_REFRESH_STATE
+
+
+@app.post("/api/data/refresh", status_code=202)
+def refresh_data(request: Request, background_tasks: BackgroundTasks) -> dict:
+    global _DATA_REFRESH_STATE
+    _check_csrf(request)
+    if not _DATA_REFRESH_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Обновление данных уже выполняется.")
+    _DATA_REFRESH_STATE = {"status": "running", "message": "Собираем новости, курсы, акции и металлы…", "started_at": now_utc()}
+    background_tasks.add_task(_refresh_all_data)
+    return dict(_DATA_REFRESH_STATE)
+
+
+async def _refresh_all_data() -> None:
+    global _DATA_REFRESH_STATE
+    started_at = _DATA_REFRESH_STATE["started_at"]
+    try:
+        results = await asyncio.gather(
+            asyncio.to_thread(_collect_news), asyncio.to_thread(_collect_market), return_exceptions=True,
+        )
+        collected = {}
+        for kind, result in zip(("news", "market"), results):
+            if isinstance(result, BaseException):
+                logger.error("data_refresh_failed kind=%s", kind, exc_info=(type(result), result, result.__traceback__))
+                message = result.detail if isinstance(result, HTTPException) else "Источник временно недоступен. Повторите обновление."
+                collected[kind] = {"status": "error", "message": message}
+            else:
+                collected[kind] = result
+        failures = sum(item.get("status") == "error" for item in collected.values())
+        incomplete = any(item.get("status") == "partial" for item in collected.values())
+        status = "error" if failures == 2 else "partial" if failures or incomplete else "complete"
+        added = sum(item.get("imported", 0) for item in collected["news"].get("sources", []))
+        market_count = collected["market"].get("stored", 0)
+        message = f"Обновлено. Новых новостей: {added}, рыночных значений: {market_count}."
+        if status == "partial":
+            message = f"Обновлено частично. Новых новостей: {added}, рыночных значений: {market_count}. Часть источников недоступна — можно повторить обновление."
+        elif status == "error":
+            message = "Не удалось обновить данные. Проверьте соединение и повторите запуск."
+        _DATA_REFRESH_STATE = {"status": status, "message": message, "started_at": started_at, "finished_at": now_utc(), **collected}
+    except Exception:
+        logger.exception("data_refresh_failed")
+        _DATA_REFRESH_STATE = {"status": "error", "message": "Не удалось завершить обновление. Повторите запуск.", "started_at": started_at, "finished_at": now_utc()}
+    finally:
+        _DATA_REFRESH_LOCK.release()
 
 
 def _collect_news() -> dict:
@@ -420,7 +426,19 @@ def _collect_news_locked() -> dict:
     return result
 
 
+_MARKET_COLLECTION_LOCK = Lock()
+
+
 def _collect_market() -> dict:
+    if not _MARKET_COLLECTION_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Сбор рыночных данных уже выполняется.")
+    try:
+        return _collect_market_locked()
+    finally:
+        _MARKET_COLLECTION_LOCK.release()
+
+
+def _collect_market_locked() -> dict:
     configured = developer_settings()
     run = collect_market_data(configured["market_categories"])
     added = store_observations(run["items"])
@@ -714,7 +732,8 @@ def _real_feed_payload(user_id: str, *, enqueue_manual: bool = False, refresh_in
     settings = developer_settings()
     news_items = _fresh_real_news(settings["news_lookback_days"])
     state = analysis_results(profile_id, profile_version)
-    missing = missing_candidates(profile_id, profile_version, news_items)
+    retry_rules = enqueue_manual and settings["task_routes"]["real"].get("news_selection", "mock") != "mock"
+    missing = missing_candidates(profile_id, profile_version, news_items, retry_rules=retry_rules)
     latest_job = state["job"]
     current_analysis_count = sum(
         1 for item in news_items
@@ -746,10 +765,11 @@ def _real_feed_payload(user_id: str, *, enqueue_manual: bool = False, refresh_in
     with connect_app() as connection:
         saved_reports = connection.execute(
             "SELECT news_id, news_hash, report_json, created_at FROM profile_news_reports "
-            "WHERE profile_id = ? AND profile_version = ? AND report_version = 'profile-news-report-v2'",
-            (profile_id, profile_version),
+            "WHERE profile_id = ? AND profile_version = ? AND report_version = ?",
+            (profile_id, profile_version, _report_version()),
         ).fetchall()
     reports_by_id = {row["news_id"]: row for row in saved_reports}
+    ensure_recommendations(profile_id, news_items)
     recommendations = bank_recommendations(profile_id)
     for item in news_items:
         analysis = state["items"].get(item.id)
@@ -759,15 +779,18 @@ def _real_feed_payload(user_id: str, *, enqueue_manual: bool = False, refresh_in
         report = None
         if report_row and report_row["news_hash"] == article_hash(item):
             try:
-                report_data = json.loads(report_row["report_json"])
+                report_data = display_report(json.loads(report_row["report_json"]))
+                if report_data.get("bank_context_hash") != context_hash(selected_evidence(saved, item)):
+                    raise ValueError("Bank source selection changed")
                 report = {
                     **report_data, "created_at": report_row["created_at"],
                     "citations": ([{"title": item.title, "url": item.url, "published_at": item.published_at, "kind": "news"}]
                                   if f"news:{item.id}" in report_data.get("evidence_ids", []) else [])
                     + ([{"title": "Профиль компании", "url": "", "published_at": "", "kind": "profile"}]
-                       if "company-profile" in report_data.get("evidence_ids", []) else []),
+                       if "company-profile" in report_data.get("evidence_ids", []) else [])
+                    + evidence_citations(report_data.get("bank_sources", [])),
                 }
-            except (TypeError, json.JSONDecodeError):
+            except (TypeError, ValueError):
                 report = None
         rows.append({
             "id": item.id, "title": item.title, "published_at": item.published_at,
@@ -807,6 +830,12 @@ def refresh_real_insight(request: Request) -> dict:
     return _real_feed_payload(user["id"], refresh_insight=True, skip_auto_queue=True)
 
 
+def _report_version() -> str:
+    route = resolve_route("heavy", task="news_report", space="real")
+    validation = int(developer_settings().get("validate_numeric_grounding", True))
+    return f"profile-news-report-v5:{route.provider}:{route.model}:{validation}:{matching_version()}"
+
+
 @app.post("/api/real/news/{news_id}/report")
 def create_profile_news_report(news_id: str, payload: ProfileNewsReportRequest, request: Request) -> dict:
     _check_csrf(request)
@@ -819,8 +848,9 @@ def create_profile_news_report(news_id: str, payload: ProfileNewsReportRequest, 
         raise HTTPException(status_code=404, detail="Новость отсутствует в актуальном официальном окне")
     news_hash = article_hash(news)
     task_route = resolve_route("heavy", task="news_report", space="real")
-    numeric_validation = int(developer_settings().get("validate_numeric_grounding", True))
-    report_version = f"profile-news-report-v3:{task_route.provider}:{task_route.model}:{numeric_validation}"
+    report_version = _report_version()
+    bank_sources = selected_evidence(saved, news)
+    bank_hash = context_hash(bank_sources)
     logger.info(
         "news_report_start news_id=%s profile_id=%s refresh=%s task_route_mode=%s task_route_provider=%s task_route_model=%s task_route_reason=%s",
         news_id, saved["profile_id"], payload.refresh, task_route.mode, task_route.provider,
@@ -832,15 +862,16 @@ def create_profile_news_report(news_id: str, payload: ProfileNewsReportRequest, 
             "AND news_id = ? AND news_hash = ? AND report_version = ?",
             (saved["profile_id"], saved["profile_version"], news.id, news_hash, report_version),
         ).fetchone()
-    if cached and not payload.refresh:
+    if cached and not payload.refresh and json.loads(cached["report_json"]).get("bank_context_hash") == bank_hash:
         logger.info("news_report_cache_hit news_id=%s profile_id=%s", news_id, saved["profile_id"])
-        report_data = json.loads(cached["report_json"])
+        report_data = display_report(json.loads(cached["report_json"]))
         citations = ([{"title": news.title, "url": news.url, "published_at": news.published_at, "kind": "news"}]
                      if f"news:{news.id}" in report_data.get("evidence_ids", []) else [])
         if "company-profile" in report_data.get("evidence_ids", []):
             citations.append({"title": "Профиль компании", "url": "", "published_at": "", "kind": "profile"})
+        citations.extend(evidence_citations(report_data.get("bank_sources", [])))
         return {**report_data, "created_at": cached["created_at"], "cached": True, "citations": citations}
-    report = analyze_profile_news(saved["profile"], news)
+    report = analyze_profile_news(saved["profile"], news, bank_sources=bank_sources)
     if report is None:
         logger.error(
             "news_report_failed news_id=%s profile_id=%s reason=%s",
@@ -858,6 +889,8 @@ def create_profile_news_report(news_id: str, payload: ProfileNewsReportRequest, 
         news_id, saved["profile_id"], len(report.get("evidence_ids", [])), len(report.get("questions", [])),
     )
     now = now_utc()
+    report = display_report(report)
+    report["bank_context_hash"] = bank_hash
     with connect_app() as connection:
         connection.execute(
             "INSERT INTO profile_news_reports (profile_id, profile_version, news_id, news_hash, report_version, report_json, created_at) "
@@ -871,10 +904,22 @@ def create_profile_news_report(news_id: str, payload: ProfileNewsReportRequest, 
             "(SELECT id FROM profile_news_reports WHERE profile_id = ? ORDER BY created_at DESC LIMIT 500)",
             (saved["profile_id"], saved["profile_id"]),
         )
+        report_id = connection.execute(
+            "SELECT id FROM profile_news_reports WHERE profile_id=? AND profile_version=? AND news_id=? "
+            "AND news_hash=? AND report_version=?",
+            (saved["profile_id"], saved["profile_version"], news.id, news_hash, report_version),
+        ).fetchone()[0]
+        connection.execute("DELETE FROM profile_news_report_bank_sources WHERE report_id=?", (report_id,))
+        connection.executemany(
+            "INSERT INTO profile_news_report_bank_sources (report_id,passage_id,source_json) VALUES (?,?,?)",
+            [(report_id, item["passage_id"], json.dumps(item, ensure_ascii=False))
+             for item in report.get("bank_sources", [])],
+        )
     citations = ([{"title": news.title, "url": news.url, "published_at": news.published_at, "kind": "news"}]
                  if f"news:{news.id}" in report["evidence_ids"] else [])
     if "company-profile" in report["evidence_ids"]:
         citations.append({"title": "Профиль компании", "url": "", "published_at": "", "kind": "profile"})
+    citations.extend(evidence_citations(report.get("bank_sources", [])))
     return {**report, "created_at": now, "cached": False, "citations": citations}
 
 
@@ -912,6 +957,11 @@ def _profile_chat_evidence(saved: dict, focused_news_id: str | None, question: s
             "published_at": item.published_at, "kind": "news", "source": item.source or "Официальный источник",
             "focus": bool(focused_news_id and item.id == focused_news_id),
         })
+    if selected is not None:
+        bank_sources = selected_evidence(saved, selected)
+    else:
+        bank_sources, _reason = bank_evidence(profile, None, question)
+    evidence.extend(bank_sources)
     try:
         for index, item in enumerate(market_snapshot().get("items", [])[:5]):
             evidence.append({
@@ -924,6 +974,103 @@ def _profile_chat_evidence(saved: dict, focused_news_id: str | None, question: s
     except (KeyError, TypeError):
         pass
     return evidence[:12]
+
+
+class BankMaterialInput(BaseModel):
+    title: str = Field(min_length=1, max_length=240)
+    published_at: str = Field(pattern=r"^\d{4}-\d{2}(?:-\d{2})?$")
+    period: str = Field(default="", max_length=120)
+    notes: str = Field(default="", max_length=2000)
+    text: str = Field(min_length=40, max_length=100000)
+    topic: Literal["auto", "key_rate", "inflation", "macro", "strategy", "bonds", "consumption", "gold", "metals"] = "auto"
+
+    @field_validator("title", "text", "period", "notes", mode="before")
+    @classmethod
+    def trim_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("published_at")
+    @classmethod
+    def valid_publication_date(cls, value: str) -> str:
+        date.fromisoformat(value + "-01" if len(value) == 7 else value)
+        return value
+
+
+class BankMaterialUpdate(BankMaterialInput):
+    reviewed_text: str | None = Field(default=None, max_length=100000)
+    expected_revision: int | None = Field(default=None, ge=0)
+
+    @field_validator("reviewed_text", mode="before")
+    @classmethod
+    def trim_reviewed_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+@app.post("/api/bank/analytics", status_code=201)
+def create_bank_material(payload: BankMaterialInput, request: Request) -> dict:
+    _check_csrf(request)
+    _require_user(request)
+    try:
+        document_id = add_text_material(**payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"id": document_id}
+
+
+@app.put("/api/bank/analytics/{document_id}")
+def update_bank_material(document_id: str, payload: BankMaterialUpdate, request: Request) -> dict:
+    _check_csrf(request)
+    _require_user(request)
+    try:
+        add_text_material(document_id=document_id, **payload.model_dump())
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"id": document_id}
+
+
+@app.delete("/api/bank/analytics/{document_id}", status_code=204)
+def delete_bank_material(document_id: str, request: Request,
+                         expected_revision: int | None = Query(default=None, ge=0)) -> Response:
+    _check_csrf(request)
+    _require_user(request)
+    try:
+        delete_material(document_id, expected_revision=expected_revision)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(status_code=204)
+
+
+@app.get("/api/bank/analytics")
+def bank_analytics(request: Request, q: str = Query(default="", max_length=2000),
+                   limit: int = Query(default=20, ge=1, le=100)) -> dict:
+    _require_user(request)
+    with connect_app() as connection:
+        documents = [dict(row) for row in connection.execute(
+            "SELECT id,title,published_at,period,topic,type,page_count,notes,edited,revision FROM bank_documents WHERE deleted=0 ORDER BY published_at DESC"
+        )]
+    return {**corpus_status(), "items": documents,
+            "matches": search_passages(q, limit=limit) if q.strip() else []}
+
+
+@app.get("/api/bank/analytics/{document_id}")
+def bank_analytics_document(document_id: str, request: Request) -> dict:
+    _require_user(request)
+    with connect_app() as connection:
+        document = connection.execute("SELECT * FROM bank_documents WHERE id=? AND deleted=0", (document_id,)).fetchone()
+        if document is None:
+            raise HTTPException(status_code=404, detail="Материал банка не найден")
+        pages = [dict(row) for row in connection.execute(
+            "SELECT id,page,text,quality FROM bank_pages WHERE document_id=? AND text<>'' ORDER BY page", (document_id,)
+        )]
+        reviewed = [dict(row) for row in connection.execute(
+            "SELECT c.id,c.text,p.page FROM bank_passages c JOIN bank_pages p ON p.id=c.page_id "
+            "WHERE p.document_id=? AND c.reviewed=1 AND c.active=1 ORDER BY p.page,c.position,c.id", (document_id,)
+        )]
+    return {**dict(document), "pages": pages, "reviewed_passages": reviewed}
 
 
 def _profile_chat_session(owner_id: str, session_id: str):
@@ -1032,7 +1179,8 @@ def get_profile_chat_session(session_id: str, request: Request) -> dict:
             citations = json.loads(row["citations_json"])
         except (TypeError, json.JSONDecodeError):
             citations = []
-        messages.append({"role": row["role"], "text": row["text"], "citations": citations, "created_at": row["created_at"],
+        text = clean_source_references(row["text"], [item.get("evidence_id", "") for item in citations]) if row["role"] == "assistant" else row["text"]
+        messages.append({"role": row["role"], "text": text, "citations": citations, "created_at": row["created_at"],
                          "request_id": row["request_id"], "request_status": row["request_status"]})
     return {**dict(session), "messages": messages}
 
@@ -1074,7 +1222,10 @@ def send_profile_chat_message(session_id: str, payload: ProfileChatMessage, requ
         by_id = {item["evidence_id"]: item for item in [*evidence, *conversation_evidence(history, question)]}
         citations = [
             {"title": by_id[item_id]["title"], "url": by_id[item_id]["url"],
-             "published_at": by_id[item_id]["published_at"], "kind": by_id[item_id]["kind"]}
+             "published_at": by_id[item_id]["published_at"], "kind": by_id[item_id]["kind"],
+             **({"evidence_id": item_id, "passage_id": by_id[item_id]["passage_id"],
+                 "text": by_id[item_id]["text"], "source_hash": by_id[item_id]["source_hash"]}
+                if by_id[item_id]["kind"] == "bank" else {})}
             for item_id in dict.fromkeys(result["evidence_ids"])
         ]
         return finish_turn(session_id, key, {**result, "citations": citations}, saved["profile_version"], lease)
@@ -1355,76 +1506,6 @@ def _save_profile(body: BusinessProfileInput, user_id: str) -> dict:
     return {"profile": _profile_view(saved)}
 
 
-def _demo_original(client_id: str) -> ClientProfile:
-    _check_id(client_id, "компании")
-    original = get_original_profile(client_id)
-    if original is None:
-        raise HTTPException(status_code=404, detail="Тестовая компания не найдена")
-    return original
-
-
-@app.get("/api/demo/clients/{client_id}/profile")
-def demo_profile(client_id: str) -> dict:
-    with demo_profile_context(_demo_original(client_id)) as owner:
-        return {"profile": _profile_view(business_profile_for_owner(owner))}
-
-
-@app.put("/api/demo/clients/{client_id}/profile")
-def update_demo_profile(client_id: str, body: BusinessProfileInput, request: Request) -> dict:
-    _check_csrf(request)
-    with demo_profile_context(_demo_original(client_id)) as owner:
-        result = _save_profile(body, owner)
-    invalidate_demo_feed(client_id)
-    return result
-
-
-@app.get("/api/demo/clients/{client_id}/profile/options")
-def demo_profile_options(client_id: str) -> dict:
-    _demo_original(client_id)
-    return REAL_PROFILE_TAXONOMY
-
-
-@app.get("/api/demo/clients/{client_id}/profile/suggestions")
-def demo_profile_suggestions(client_id: str) -> dict:
-    with demo_profile_context(_demo_original(client_id)) as owner:
-        return {"suggestions": pending_profile_suggestions(owner)}
-
-
-@app.get("/api/demo/clients/{client_id}/profile/sources")
-def demo_profile_sources(client_id: str) -> dict:
-    with demo_profile_context(_demo_original(client_id)) as owner:
-        return {"sources": accepted_profile_sources(owner)}
-
-
-@app.post("/api/demo/clients/{client_id}/profile/site-analysis")
-def analyze_demo_profile_site(client_id: str, body: SiteAnalysisRequest, request: Request) -> dict:
-    _check_csrf(request)
-    if not body.consent:
-        raise HTTPException(status_code=400, detail="Подтвердите отправку текста страниц выбранной модели")
-    with demo_profile_context(_demo_original(client_id)) as owner:
-        return _analyze_profile_site(body, owner)
-
-
-@app.post("/api/demo/clients/{client_id}/profile/suggestions/decision")
-def decide_demo_profile_suggestion(client_id: str, body: ProfileSuggestionDecision, request: Request) -> dict:
-    _check_csrf(request)
-    with demo_profile_context(_demo_original(client_id)) as owner:
-        result = _decide_profile_suggestion(body, owner)
-    invalidate_demo_feed(client_id)
-    return result
-
-
-@app.post("/api/demo/clients/{client_id}/profile/suggestions/apply")
-def apply_demo_profile_suggestions(client_id: str, request: Request) -> dict:
-    _check_csrf(request)
-    with demo_profile_context(_demo_original(client_id)) as owner:
-        saved, fields = _apply_pending_suggestions(owner)
-        result = {"profile": _profile_view(saved), "filled_fields": fields,
-                  "suggestions": pending_profile_suggestions(owner), "sources": accepted_profile_sources(owner)}
-    invalidate_demo_feed(client_id)
-    return result
-
-
 @app.post("/api/auth/logout")
 def auth_logout(request: Request, response: Response) -> dict[str, str]:
     _check_csrf(request)
@@ -1520,109 +1601,6 @@ def _start_session(user_id: str, response: Response) -> None:
         samesite="lax",
         path="/",
     )
-
-
-@app.post("/api/clients/{client_id}/events/{event_id}/card")
-def event_card(client_id: str, event_id: str) -> Card:
-    _check_id(client_id, "компании")
-    _check_id(event_id, "события")
-    card = build_card(client_id, event_id)
-    if card is None:
-        raise HTTPException(status_code=404, detail="Компания или событие не найдены")
-    return card
-
-
-@app.get("/api/clients/{client_id}/events/{event_id}/steps")
-def event_steps(client_id: str, event_id: str) -> dict:
-    _check_id(client_id, "компании")
-    _check_id(event_id, "события")
-    if get_profile(client_id) is None:
-        raise HTTPException(status_code=404, detail="Компания не найдена")
-    return {"steps": latest_steps(client_id, event_id), "trace": read_trace(client_id, event_id)}
-
-
-@app.get("/api/clients/{client_id}/chats")
-def demo_chat_sessions(client_id: str) -> dict:
-    _check_id(client_id, "компании")
-    if get_profile(client_id) is None:
-        raise HTTPException(status_code=404, detail="Компания не найдена")
-    titles = {item.id: item.title for item in load_news()}
-    with connect() as connection:
-        rows = connection.execute(
-            "SELECT event_id, COUNT(*) AS message_count, MAX(id) AS last_id FROM chat_turns "
-            "WHERE client_id = ? AND role IN ('user', 'assistant') GROUP BY event_id ORDER BY last_id DESC",
-            (client_id,),
-        ).fetchall()
-    return {"sessions": [{**dict(row), "title": titles.get(row["event_id"], row["event_id"])} for row in rows]}
-
-
-@app.get("/api/clients/{client_id}/events/{event_id}/chat")
-def demo_chat_history(client_id: str, event_id: str) -> dict:
-    _check_id(client_id, "компании")
-    _check_id(event_id, "события")
-    if get_profile(client_id) is None:
-        raise HTTPException(status_code=404, detail="Компания не найдена")
-    with connect() as connection:
-        rows = connection.execute(
-            "SELECT role, text FROM chat_turns WHERE client_id = ? AND event_id = ? "
-            "AND role IN ('user', 'assistant') ORDER BY id", (client_id, event_id),
-        ).fetchall()
-    return {"messages": [dict(row) for row in rows]}
-
-
-@app.post("/api/clients/{client_id}/events/{event_id}/chat")
-def event_chat(client_id: str, event_id: str, body: ChatQuestion) -> ChatReply:
-    _check_id(client_id, "компании")
-    _check_id(event_id, "события")
-    card = build_card(client_id, event_id)
-    if card is None:
-        raise HTTPException(status_code=404, detail="Компания или событие не найдены")
-    try:
-        return answer_from_card(card, body.question, client_id, event_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.post("/api/clients/{client_id}/events/{event_id}/feedback")
-def event_feedback(client_id: str, event_id: str, body: Feedback) -> dict[str, str]:
-    _check_id(client_id, "компании")
-    _check_id(event_id, "события")
-    if get_profile(client_id) is None or find_news(event_id) is None:
-        raise HTTPException(status_code=404, detail="Компания или событие не найдены")
-    with connect() as connection:
-        connection.execute(
-            "INSERT INTO user_feedback (client_id, event_id, helpful, created_at) VALUES (?, ?, ?, ?)",
-            (client_id, event_id, int(body.helpful), datetime.now(timezone.utc).isoformat()),
-        )
-    return {"status": "saved"}
-
-
-@app.get("/api/metrics/feedback")
-def feedback_metrics() -> dict[str, int | float]:
-    """Обезличенная сводка для регулярного контроля качества прототипа."""
-    with connect() as connection:
-        row = connection.execute(
-            "SELECT COUNT(*) AS total, COALESCE(SUM(helpful), 0) AS helpful FROM user_feedback"
-        ).fetchone()
-    total = int(row["total"])
-    helpful = int(row["helpful"])
-    return {"responses": total, "helpful": helpful, "not_helpful": total - helpful,
-            "helpful_share": helpful / total if total else 0.0}
-
-
-@app.post("/api/clients/{client_id}/news")
-def paste_news(client_id: str, body: PasteNews) -> Card:
-    _check_id(client_id, "компании")
-    if get_profile(client_id) is None:
-        raise HTTPException(status_code=404, detail="Компания не найдена")
-    try:
-        item = remember_pasted(body.title, body.text, body.url, body.published_at, body.source)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    card = build_card(client_id, item.id)
-    if card is None:
-        raise HTTPException(status_code=404, detail="Не удалось собрать карточку")
-    return card
 
 
 @app.post("/api/settings")
@@ -1731,7 +1709,8 @@ def news_collection_status() -> dict:
 
 
 @app.post("/api/settings/news/collect")
-def collect_news_now() -> dict:
+def collect_news_now(request: Request) -> dict:
+    _check_csrf(request)
     return _collect_news()
 
 
@@ -1745,27 +1724,6 @@ def clear_news_database() -> dict:
         return {"status": "complete", "removed": removed, "stored_count": stored_news_count()}
     finally:
         _NEWS_COLLECTION_LOCK.release()
-
-
-@app.post("/api/settings/demo/reset")
-def reset_demo_data() -> dict:
-    """Clear runtime results from the demo journal while preserving bundled source fixtures."""
-    init_db()
-    tables = (
-        "tool_calls", "llm_calls", "feed_cache", "agent_steps",
-        "pasted_news", "chat_turns", "user_feedback",
-    )
-    removed_by_table: dict[str, int] = {}
-    with connect() as connection:
-        for table in tables:
-            # Table names come only from the fixed allowlist above.
-            removed_by_table[table] = int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
-            connection.execute(f"DELETE FROM {table}")
-    return {
-        "status": "complete",
-        "removed": sum(removed_by_table.values()),
-        "removed_by_table": removed_by_table,
-    }
 
 
 @app.get("/api/settings/market/status")
@@ -1783,29 +1741,9 @@ def market_collection_status() -> dict:
 
 
 @app.post("/api/settings/market/collect")
-def collect_market_now() -> dict:
+def collect_market_now(request: Request) -> dict:
+    _check_csrf(request)
     return _collect_market()
-
-
-@app.get("/api/clients/{client_id}")
-def client_profile(client_id: str) -> ClientProfile:
-    _check_id(client_id, "компании")
-    profile = get_profile(client_id)
-    if profile is None:
-        raise HTTPException(status_code=404, detail="Компания не найдена")
-    return profile
-
-
-@app.get("/api/news")
-def news():
-    return load_news()
-
-
-@app.get("/api/search")
-def search(q: str = "") -> dict[str, list[SearchHit]]:
-    if len(q) > _QUERY_LIMIT:
-        raise HTTPException(status_code=400, detail="Слишком длинный запрос")
-    return {"news": search_news(q), "bank": search_bank_analytics(q)}
 
 
 class IndexStatus(BaseModel):

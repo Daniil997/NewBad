@@ -36,7 +36,14 @@ export type SiteSuggestion = {
 export type ChatCitation = { title: string; url: string; published_at: string; kind: string };
 export type ChatMessage = { role: "user" | "assistant"; text: string; citations: ChatCitation[]; created_at: string; request_id?: string; request_status?: "pending" | "failed" | "completed" };
 export type ChatSession = { id: string; title: string; focused_news_id: string | null; updated_at: string; message_count: number; preview: string | null };
-export type BankRecommendation = { text: string; page: number | null; updated_at: string | null };
+export type BankSource = {
+  evidence_id: string; passage_id: string; document_id: string; title: string;
+  text: string; published_at: string; period: string;
+};
+export type BankRecommendation = {
+  text: string; page: number | null; updated_at: string | null;
+  origin?: "corpus"; sources?: BankSource[]; match_reason?: string;
+};
 export type RealNewsItem = {
   id: string; title: string; published_at: string; excerpt: string; event_type: string;
   event_title: string; source: string; url: string;

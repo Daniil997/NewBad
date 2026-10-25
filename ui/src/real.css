@@ -1,4 +1,4 @@
-/* Реальный режим. Все правила под .real, чтобы не конфликтовать с общими стилями и тестовым режимом. */
+/* Company workspace styles. */
 
 .real .sr-only {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;

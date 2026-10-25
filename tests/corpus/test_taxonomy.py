@@ -1,6 +1,6 @@
 import yaml
 
-from app.corpus.search import classify, load_news
+from app.corpus.search import classify
 from app.db import ROOT
 
 _TOPICS = {
@@ -51,17 +51,6 @@ def test_clear_events_keep_their_category():
     assert classify("Налоговая ставка для компаний вырастет") == "regulation_tax"
     assert classify("Поставки нефти временно остановили на время ремонта") == "commodities_energy"
 
-    news = {item.id: item for item in load_news()}
-    assert news["cbr-rate-14"].event_type == "monetary_policy"
-    assert news["inflation-august"].event_type == "inflation_macro"
-    assert news["gdp-half"].event_type == "macro"
-    assert news["gold-august"].event_type == "precious_metals"
-    assert news["brent-oil"].event_type == "commodities_energy"
-    assert news["usd-rub"].event_type == "fx"
-    assert news["tax-draft"].event_type == "regulation_tax"
-    assert news["labor-market"].event_type == "consumption_labor"
-    assert news["export-limits"].event_type == "sanctions_trade"
-    assert news["gas-price"].event_type == "commodities_energy"
 
 
 def test_equal_evidence_is_ambiguous_even_if_priority_differs():

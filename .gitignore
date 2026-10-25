@@ -23,17 +23,15 @@ venv/
 # Weights, raw data, caches and local journal
 models/*
 !models/README.md
-data/raw/*
-!data/raw/.gitkeep
-data/cache/*
-!data/cache/.gitkeep
+data/raw/
+data/cache/
 data/tessdata/*
 data/bank/extracted/*
-data/news/imported/*
 data/news/imported/*
 data/*.sqlite3
 data/*.sqlite3-*
 data/*.sqlite3.bak*
+!data/bank/corpus.sqlite3
 
 # Frontend
 node_modules/

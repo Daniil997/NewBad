@@ -304,35 +304,6 @@ dd {
   font-size: 0.82rem;
 }
 
-.mode-switch {
-  display: inline-flex;
-  flex-shrink: 0;
-  gap: 0.2rem;
-  padding: 0.2rem;
-  border: 1px solid rgb(255 255 255 / 48%);
-  border-radius: 999px;
-}
-
-.mode-switch button {
-  border: 1px solid transparent;
-  border-radius: 999px;
-  padding: 0.4rem 0.7rem;
-  background: transparent;
-  color: #fff;
-  font: inherit;
-  cursor: pointer;
-}
-
-.mode-switch button.active {
-  background: #fff;
-  color: #b51f17;
-}
-
-.mode-switch button:focus-visible {
-  outline: 2px solid #1a1a1a;
-  outline-offset: 2px;
-}
-
 .bank-bar strong,
 .bar-button {
   color: #fff;
@@ -889,11 +860,6 @@ details.paste {
   .bank-bar {
     flex-wrap: wrap;
     padding: 0.75rem 1rem;
-  }
-
-  .mode-switch button {
-    padding: 0.35rem 0.55rem;
-    font-size: 0.85rem;
   }
 }
 

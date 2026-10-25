@@ -1,4 +1,4 @@
-"""SQLite persistence for collected news; bundled demo fixtures remain JSON files."""
+"""SQLite persistence for collected news."""
 
 import json
 from datetime import date, timedelta
@@ -42,14 +42,22 @@ def bank_recommendations(profile_id: str) -> dict[str, dict]:
     init_app_db()
     with connect_app() as connection:
         rows = connection.execute(
-            "SELECT news_id, text, page, updated_at FROM profile_bank_recommendations WHERE profile_id = ?",
+            "SELECT news_id, text, page, updated_at, origin, sources_json, match_reason "
+            "FROM profile_bank_recommendations WHERE profile_id = ? AND text<>''",
             (profile_id,),
         ).fetchall()
-    return {row["news_id"]: {key: row[key] for key in ("text", "page", "updated_at")} for row in rows}
+    return {row["news_id"]: {
+        **{key: row[key] for key in ("text", "page", "updated_at")},
+        **({"origin": "corpus", "sources": json.loads(row["sources_json"]), "match_reason": row["match_reason"]}
+           if row["origin"] == "corpus" else {}),
+    } for row in rows}
 
 
 def recommendation_news(profile_id: str) -> list[dict] | None:
     init_app_db()
+    from app.bank_store import ensure_recommendations
+
+    ensure_recommendations(profile_id)
     with connect_app() as connection:
         if not connection.execute("SELECT id FROM business_profiles WHERE id = ?", (profile_id,)).fetchone():
             return None
@@ -61,8 +69,9 @@ def recommendation_news(profile_id: str) -> list[dict] | None:
             "ON r.news_id = n.id AND r.profile_id = ? ORDER BY n.published_at DESC, n.id DESC",
             (profile_id,),
         ).fetchall()
+    assessments = bank_recommendations(profile_id)
     return [{**{key: row[key] for key in ("id", "title", "source", "url", "published_at", "event_title")},
-             "bank_recommendation": {key: row[key] for key in ("text", "page", "updated_at")},
+             "bank_recommendation": assessments.get(row["id"], {"text": "", "page": None, "updated_at": None}),
              "legacy_bank_recommendation": {"text": row["legacy_text"], "page": row["legacy_page"]}}
             for row in rows]
 
@@ -85,10 +94,25 @@ def save_bank_recommendation(profile_id: str, news_id: str, text: str, page: int
         connection.execute(
             "INSERT INTO profile_bank_recommendations (profile_id, news_id, text, page, updated_at) "
             "VALUES (?, ?, ?, ?, ?) ON CONFLICT(profile_id, news_id) DO UPDATE SET "
-            "text = excluded.text, page = excluded.page, updated_at = excluded.updated_at",
+            "text = excluded.text, page = excluded.page, updated_at = excluded.updated_at, "
+            "origin='editorial',sources_json='[]',match_reason='',profile_version=NULL,news_hash=NULL,corpus_version=NULL",
             (profile_id, news_id, text, page, updated_at),
         )
+        connection.execute("DELETE FROM profile_bank_sources WHERE profile_id=? AND news_id=?", (profile_id, news_id))
     return {"text": text, "page": page, "updated_at": updated_at}
+
+
+def refresh_news_topics() -> int:
+    """Reclassify existing articles after taxonomy changes; preserve source text and IDs."""
+    from app.news_topics import load_taxonomy
+
+    taxonomy = load_taxonomy()
+    with connect_app() as connection:
+        rows = connection.execute("SELECT id,title,text,event_type,event_title FROM news_articles").fetchall()
+        changes = [(*news_topic(row["title"], row["text"], taxonomy), row["id"]) for row in rows
+                   if news_topic(row["title"], row["text"], taxonomy) != (row["event_type"], row["event_title"])]
+        connection.executemany("UPDATE news_articles SET event_type=?,event_title=? WHERE id=?", changes)
+    return len(changes)
 
 
 def store_imported_news(source_id: str, items: list[dict]) -> int:

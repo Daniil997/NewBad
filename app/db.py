@@ -55,21 +55,6 @@ def init_db() -> None:
                 client_id TEXT,
                 event_id TEXT
             );
-            CREATE TABLE IF NOT EXISTS feed_cache (
-                client_id TEXT NOT NULL,
-                corpus_version TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                PRIMARY KEY (client_id, corpus_version)
-            );
-            CREATE TABLE IF NOT EXISTS agent_steps (
-                id INTEGER PRIMARY KEY,
-                client_id TEXT NOT NULL,
-                event_id TEXT NOT NULL,
-                step TEXT NOT NULL,
-                detail TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
             CREATE TABLE IF NOT EXISTS llm_replay (
                 prompt_hash TEXT PRIMARY KEY,
                 model TEXT NOT NULL,
@@ -78,37 +63,8 @@ def init_db() -> None:
                 tokens INTEGER NOT NULL,
                 created_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS pasted_news (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                excerpt TEXT NOT NULL,
-                url TEXT NOT NULL,
-                event_type TEXT,
-                event_title TEXT,
-                published_at TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                source TEXT
-            );
-            CREATE TABLE IF NOT EXISTS chat_turns (
-                id INTEGER PRIMARY KEY,
-                client_id TEXT NOT NULL,
-                event_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                text TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS user_feedback (
-                id INTEGER PRIMARY KEY,
-                client_id TEXT NOT NULL,
-                event_id TEXT NOT NULL,
-                helpful INTEGER NOT NULL CHECK (helpful IN (0, 1)),
-                created_at TEXT NOT NULL
-            );
             """
         )
-        columns = {row["name"] for row in connection.execute("PRAGMA table_info(pasted_news)")}
-        if "source" not in columns:
-            connection.execute("ALTER TABLE pasted_news ADD COLUMN source TEXT")
         _add_column(connection, "tool_calls", "result", "TEXT")
         _add_column(connection, "tool_calls", "client_id", "TEXT")
         _add_column(connection, "tool_calls", "event_id", "TEXT")

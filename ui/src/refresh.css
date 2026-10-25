@@ -1,0 +1,6 @@
+.data-refresh { display: flex; flex-direction: column; align-items: center; gap: 5px; max-width: 460px; }
+.data-refresh .bar-button { border: 1px solid #dedee3; border-radius: 9px; padding: 9px 16px; background: #fff; color: #242429; cursor: pointer; font: inherit; }
+.data-refresh .bar-button:disabled { cursor: wait; opacity: .65; }
+.data-refresh-status { font-size: 12px; line-height: 1.4; color: #515563; text-align: center; }
+.data-refresh-status.is-error, .data-refresh-status.is-partial { color: #a84b20; }
+@media (max-width: 640px) { .data-refresh { max-width: 210px; } }

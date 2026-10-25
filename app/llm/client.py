@@ -40,7 +40,13 @@ def post_chat(
     transport: httpx.BaseTransport | None = None,
 ) -> dict:
     with httpx.Client(timeout=timeout, transport=transport) as client:
-        response = client.post(url, json=payload, headers=headers)
+        try:
+            response = client.post(url, json=payload, headers=headers)
+        except httpx.ConnectError:
+            # Retry only a connection failure: the inference request has not reached
+            # the provider. Never automatically repeat a timed-out or billed request.
+            time.sleep(0.2)
+            response = client.post(url, json=payload, headers=headers)
         response.raise_for_status()
         return response.json()
 
@@ -163,7 +169,7 @@ def complete(
             text = message["content"]
             usage = body.get("usage") or {}
             tokens = int(usage.get("total_tokens") or 0)
-    except (KeyError, IndexError, TypeError, ValueError) as exc:
+    except (KeyError, IndexError, TypeError, ValueError):
         logger.warning(
             "llm_request_failed category=invalid_response_shape provider=%s mode=%s model=%s endpoint=%s elapsed_ms=%s body_type=%s top_level_keys=%s",
             chosen, mode, model, url.split("?", 1)[0], latency_ms, type(body).__name__,

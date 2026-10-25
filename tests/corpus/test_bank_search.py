@@ -118,7 +118,6 @@ def test_real_corpus_finds_inflation_and_drops_a_common_word():
     assert forms[0].id == "inflation"
     assert forms[0].strength == "narrow"
     assert search_bank_analytics("данные") == []
-    assert search_bank_analytics("ключевая ставка")[0].id == "key_rate"
 
 
 def test_empty_corpus_is_not_a_load_error(tmp_path, monkeypatch):

@@ -112,7 +112,7 @@ def test_v12_migration_preserves_news_and_adds_empty_recommendations(monkeypatch
     assert bank_recommendations("unassigned-profile") == {}
     with connect_app() as connection:
         assert connection.execute("SELECT title FROM news_articles").fetchone()[0] == "Исходная новость"
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 17
 
 
 def test_profile_search_data_and_required_selection(profile_id):

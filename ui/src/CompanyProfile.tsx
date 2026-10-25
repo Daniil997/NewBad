@@ -33,7 +33,7 @@ const FIELD_LABELS = { ...PROFILE_FIELD_LABELS, website: "Сайт компан�
 type TextField = "company_name" | "website" | "country" | "region" | "city" | "industry" | "okved" | "size_band" | "business_stage" | "customer_types" | "business_model";
 type ProfileResponse = { profile: SavedProfile; suggestions?: SiteSuggestion[]; sources?: SiteSuggestion[]; filled_fields?: string[] };
 type Props = {
-  mode: "real" | "demo"; apiBase: string; initialProfile?: SavedProfile | null;
+  apiBase: string; initialProfile?: SavedProfile | null;
   onBack: () => void; onSaved: (profile: SavedProfile) => void;
   onDirtyChange: (dirty: boolean) => void; onBusyChange: (busy: boolean) => void;
 };
@@ -61,7 +61,7 @@ function Tags({ options, selected, onChange }: { options: ProfileOptions["indust
 }
 function commaList(value: string) { return [...new Set(value.split(",").map((part) => part.trim()).filter(Boolean))]; }
 
-export function CompanyProfile({ mode, apiBase, initialProfile, onBack, onSaved, onDirtyChange, onBusyChange }: Props) {
+export function CompanyProfile({ apiBase, initialProfile, onBack, onSaved, onDirtyChange, onBusyChange }: Props) {
   const [section, setSection] = useState<Section>("about");
   const [profile, setProfile] = useState<BusinessProfile>({ ...EMPTY_PROFILE, ...initialProfile });
   const [saved, setSaved] = useState<SavedProfile | null>(initialProfile ?? null);
@@ -186,7 +186,7 @@ export function CompanyProfile({ mode, apiBase, initialProfile, onBack, onSaved,
   }
 
   return <div className="cp-page">
-    <div className="cp-topline"><button type="button" className="cp-back" onClick={back} disabled={locked}>← К новостям</button><span className={`cp-mode ${mode === "demo" ? "is-demo" : ""}`}>{mode === "demo" ? "Тестовые данные" : "Реальный профиль"}</span></div>
+    <div className="cp-topline"><button type="button" className="cp-back" onClick={back} disabled={locked}>← К новостям</button><span className="cp-mode">Профиль компании</span></div>
     <div className="cp-heading"><div><p className="cp-eyebrow">Компания / Профиль</p><h1>Профиль компании</h1><p>Расскажите о бизнесе, чтобы получать подходящие новости и аналитику.</p></div></div>
     <div className="cp-layout">
       <aside className="cp-sidebar">

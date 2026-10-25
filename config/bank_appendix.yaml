@@ -1,5 +1,6 @@
 # Каталог PDF приложения 2. Запись в этом файле не означает, что текст документа прочитан.
-# Дата берётся из имени файла. Если в имени только месяц или период, день не ставится.
+# Каталог для отдельной подготовки корпуса; сервис использует SQLite, не PDF.
+# Дата публикации отделяется от периода обзора и проверяется по содержимому.
 # У обзора инфляции день взят из первой страницы: выпуск от 2 сентября 2026.
 # В тексте кейса девятый материал назван commodities performance. В папке вместо него обзор стали от 15 апреля 2021.
 documents:
@@ -27,7 +28,7 @@ documents:
   - id: gold
     file: Gold_digest_August26.pdf
     title: Обзор рынка золота, август 2026
-    date: 2026-08
+    date: 2026-09
     type: precious_metals
     topic: gold
     source: bank_analytics
@@ -41,21 +42,21 @@ documents:
   - id: macro_7m
     file: ALFA-7M26.pdf
     title: Макростатистика, 7 месяцев 2026
-    date: 2026-07
+    date: 2026-09-07
     type: inflation_macro
     topic: macro
     source: bank_analytics
   - id: consumption
     file: ALFA-consumption.pdf
     title: Потребление на пике
-    date: unknown
+    date: 2026-08-05
     type: consumption_labor
     topic: consumption
     source: bank_analytics
   - id: macro_1h
     file: ALFA-macro_stat1H26.pdf
     title: Макростатистика, 1 полугодие 2026
-    date: 2026-06
+    date: 2026-07-31
     type: inflation_macro
     topic: macro
     source: bank_analytics

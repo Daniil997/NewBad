@@ -95,7 +95,7 @@ export function NewsRecommendations({ onDirtyChange, onBusyChange }: {
       });
       setItems((current) => current.map((item) => item.id === selected.id ? { ...item, bank_recommendation: saved.bank_recommendation } : item));
       setText(saved.bank_recommendation.text); setPage(String(saved.bank_recommendation.page ?? ""));
-      setNotice(saved.bank_recommendation.text ? `Оценка сохранена для компании «${profile.company_name || profile.login}».` : "Оценка очищена только для выбранного профиля. В его карточке снова отображается заглушка.");
+      setNotice(saved.bank_recommendation.text ? `Оценка сохранена для компании «${profile.company_name || profile.login}».` : "Ручная оценка удалена для выбранного профиля. Подходящая аналитика банка будет подобрана автоматически.");
     } catch (reason) { setError((reason as Error).message); }
     finally { setBusy(false); }
   }
@@ -142,7 +142,7 @@ export function NewsRecommendations({ onDirtyChange, onBusyChange }: {
           setText(selected.legacy_bank_recommendation!.text); setPage(String(selected.legacy_bank_recommendation!.page ?? "")); setNotice("");
         }}>Использовать для этого профиля</button></details> : null}
         <label>Индивидуальная оценка<textarea rows={8} maxLength={10000} value={text} onChange={(event) => { setText(event.target.value); setNotice(""); }} placeholder={BANK_RECOMMENDATION_PLACEHOLDER} disabled={busy} /><small>{text.length} / 10 000. Пустой текст возвращает заглушку только для этого профиля.</small></label>
-        <label>Страница материала банка, если есть<input type="number" min={1} max={10000} step={1} value={page} onChange={(event) => { setPage(event.target.value); setNotice(""); }} disabled={busy} placeholder="Не указана" /></label>
+        {selected.bank_recommendation.origin === "corpus" ? <p className="dev-description">Текст подобран из аналитики банка с учётом профиля. Сохранённая ручная оценка получит приоритет над автоматическим подбором.</p> : null}
         <div className="dev-recommendation-preview"><p className="dev-eyebrow">Как увидит выбранная компания</p><BankRecommendation recommendation={{ text, page: page !== "" ? Number(page) : null, updated_at: null }} /></div>
         <div className="dev-editor-actions"><button type="submit" className="dev-button" disabled={!dirty || busy}>{busy ? "Сохраняем…" : "Сохранить оценку"}</button>
           <button type="button" className="dev-button is-secondary" disabled={!dirty || busy} onClick={() => { setText(selected.bank_recommendation.text); setPage(String(selected.bank_recommendation.page ?? "")); setError(""); setNotice(""); }}>Отменить изменения</button>

@@ -1,9 +1,0 @@
-fastapi==0.115.5
-uvicorn[standard]==0.32.1
-pydantic==2.10.3
-httpx==0.28.1
-PyYAML==6.0.2
-duckdb==1.2.2
-rank-bm25==0.2.2
-numpy==2.4.6
-PyMuPDF==1.26.4

@@ -1,12 +1,10 @@
-"""SQLite account persistence and profile operations scoped to real or demo storage."""
+"""SQLite accounts, company profiles and service settings."""
 
 import hashlib
 import json
 import os
 import secrets
 import sqlite3
-from contextlib import contextmanager
-from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -20,7 +18,6 @@ DEFAULT_DEVELOPER_SETTINGS = {
     "validate_numeric_grounding": True,
     "task_routes": {
         "real": {"profile_site": "mock", "news_report": "mock", "news_selection": "mock", "chat": "mock"},
-        "demo": {"news_card": "mock", "news_card_fact": "mock", "news_card_copy": "mock", "chat": "mock"},
     },
     "news_lookback_days": 14,
     "news_retention_days": 90,
@@ -56,35 +53,11 @@ def connect_app() -> sqlite3.Connection:
     return connection
 
 
-_PROFILE_DATABASE: ContextVar[Path | None] = ContextVar("profile_database", default=None)
-
-
-@contextmanager
-def profile_database(path: Path):
-    """Scope profile operations to an isolated demo store; auth and settings stay in the main DB."""
-    token = _PROFILE_DATABASE.set(path)
-    try:
-        yield
-    finally:
-        _PROFILE_DATABASE.reset(token)
-
-
-def connect_profile() -> sqlite3.Connection:
-    path = _PROFILE_DATABASE.get()
-    if path is None:
-        return connect_app()
-    connection = sqlite3.connect(path, timeout=5)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    connection.execute("PRAGMA busy_timeout = 5000")
-    return connection
-
-
 def init_app_db() -> None:
     with connect_app() as connection:
         connection.execute("PRAGMA journal_mode = WAL")
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-    if version > 14:
+    if version > 17:
         raise RuntimeError(f"Unsupported app database version: {version}")
     if version == 0:
         with connect_app() as connection:
@@ -446,6 +419,74 @@ def init_app_db() -> None:
                     )
                 """)
                 connection.execute("PRAGMA user_version = 14")
+        version = 14
+    if version == 14:
+        from app.bank_store import create_corpus_schema
+
+        with connect_app() as connection:
+            connection.execute("BEGIN EXCLUSIVE")
+            if int(connection.execute("PRAGMA user_version").fetchone()[0]) == 14:
+                create_corpus_schema(connection)
+                for name, definition in (
+                    ("origin", "TEXT NOT NULL DEFAULT 'editorial'"),
+                    ("sources_json", "TEXT NOT NULL DEFAULT '[]'"),
+                    ("profile_version", "INTEGER"),
+                    ("news_hash", "TEXT"),
+                    ("corpus_version", "TEXT"),
+                    ("match_reason", "TEXT NOT NULL DEFAULT ''"),
+                ):
+                    connection.execute(f"ALTER TABLE profile_bank_recommendations ADD COLUMN {name} {definition}")
+                connection.execute("""CREATE TABLE profile_bank_sources (
+                    profile_id TEXT NOT NULL, news_id TEXT NOT NULL,
+                    passage_id TEXT NOT NULL REFERENCES bank_passages(id),
+                    PRIMARY KEY(profile_id, news_id, passage_id),
+                    FOREIGN KEY(profile_id, news_id) REFERENCES profile_bank_recommendations(profile_id,news_id)
+                        ON DELETE CASCADE)""")
+                connection.execute("""CREATE TABLE profile_news_report_bank_sources (
+                    report_id INTEGER NOT NULL REFERENCES profile_news_reports(id) ON DELETE CASCADE,
+                    passage_id TEXT NOT NULL REFERENCES bank_passages(id),
+                    source_json TEXT NOT NULL,
+                    PRIMARY KEY(report_id,passage_id))""")
+                connection.execute("PRAGMA user_version = 15")
+        version = 15
+    if version == 15:
+        with connect_app() as connection:
+            connection.execute("BEGIN EXCLUSIVE")
+            if int(connection.execute("PRAGMA user_version").fetchone()[0]) == 15:
+                _ensure_bank_edit_columns(connection)
+                connection.execute("PRAGMA user_version = 16")
+        version = 16
+    if version == 16:
+        with connect_app() as connection:
+            connection.execute("BEGIN EXCLUSIVE")
+            if int(connection.execute("PRAGMA user_version").fetchone()[0]) == 16:
+                # Earlier v16 installations can lack position/content_hash. Never assume
+                # that a version stamped by an intermediate build has every column.
+                _ensure_bank_edit_columns(connection)
+                connection.execute("PRAGMA user_version = 17")
+    from app.bank_store import import_corpus
+
+    import_corpus()
+
+
+def _ensure_bank_edit_columns(connection: sqlite3.Connection) -> None:
+    additions = {
+        "bank_documents": {
+            "edited": "INTEGER NOT NULL DEFAULT 0",
+            "deleted": "INTEGER NOT NULL DEFAULT 0",
+            "revision": "INTEGER NOT NULL DEFAULT 0",
+            "content_hash": "TEXT NOT NULL DEFAULT ''",
+        },
+        "bank_passages": {
+            "active": "INTEGER NOT NULL DEFAULT 1",
+            "position": "INTEGER NOT NULL DEFAULT 0",
+        },
+    }
+    for table, fields in additions.items():
+        existing = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+        for field, definition in fields.items():
+            if field not in existing:
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN {field} {definition}")
 
 
 def now_utc() -> str:
@@ -472,14 +513,6 @@ def developer_settings() -> dict:
         }
         for space in DEFAULT_DEVELOPER_SETTINGS["task_routes"]
     }
-    # Migrate old installations that configured one model for the whole demo card.
-    stored_demo_routes = stored.get("task_routes", {}).get("demo") or {}
-    if "news_card" in stored_demo_routes:
-        for task in ("news_card_fact", "news_card_copy"):
-            if task not in stored_demo_routes:
-                merged["task_routes"]["demo"][task] = (
-                    "mock" if stored_demo_routes["news_card"] == "inherit" else stored_demo_routes["news_card"]
-                )
     return merged
 
 
@@ -489,14 +522,6 @@ def save_developer_settings(settings: dict) -> dict:
         space: {**DEFAULT_DEVELOPER_SETTINGS["task_routes"][space], **(settings.get("task_routes", {}).get(space) or {})}
         for space in DEFAULT_DEVELOPER_SETTINGS["task_routes"]
     }
-    # Older clients may still submit only the original news_card route.
-    supplied_demo_routes = settings.get("task_routes", {}).get("demo") or {}
-    if "news_card" in supplied_demo_routes:
-        for task in ("news_card_fact", "news_card_copy"):
-            if task not in supplied_demo_routes:
-                merged["task_routes"]["demo"][task] = (
-                    "mock" if supplied_demo_routes["news_card"] == "inherit" else supplied_demo_routes["news_card"]
-                )
     with connect_app() as connection:
         connection.execute(
             "INSERT INTO developer_settings (id, settings_json, updated_at) VALUES (1, ?, ?) "
@@ -607,7 +632,7 @@ def revoke_session(token: str) -> None:
 
 
 def business_profile_for_owner(user_id: str) -> dict | None:
-    with connect_profile() as connection:
+    with connect_app() as connection:
         row = connection.execute(
             "SELECT id, profile_json, profile_version, status, created_at, updated_at "
             "FROM business_profiles WHERE owner_id = ?",
@@ -632,7 +657,7 @@ def business_profile_for_owner(user_id: str) -> dict | None:
 def save_business_profile(user_id: str, profile: dict, status: str) -> dict | None:
     serialized = json.dumps(profile, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     now = now_utc()
-    with connect_profile() as connection:
+    with connect_app() as connection:
         row = connection.execute(
             "SELECT profile_json, profile_version FROM business_profiles WHERE owner_id = ?",
             (user_id,),
@@ -654,7 +679,7 @@ def save_business_profile(user_id: str, profile: dict, status: str) -> dict | No
 def save_profile_suggestions(user_id: str, suggestions: list[dict]) -> list[dict]:
     now = now_utc()
     saved: list[dict] = []
-    with connect_profile() as connection:
+    with connect_app() as connection:
         profile_row = connection.execute(
             "SELECT id, profile_json FROM business_profiles WHERE owner_id = ?",
             (user_id,),
@@ -715,7 +740,7 @@ def save_profile_suggestions(user_id: str, suggestions: list[dict]) -> list[dict
 
 
 def pending_profile_suggestions(user_id: str) -> list[dict]:
-    with connect_profile() as connection:
+    with connect_app() as connection:
         rows = connection.execute(
             """
             SELECT field_name, value_json, source_url, source_title, extracted_at, confidence
@@ -731,7 +756,7 @@ def pending_profile_suggestions(user_id: str) -> list[dict]:
 
 def accepted_profile_sources(user_id: str) -> list[dict]:
     """Show where current site-filled values originated; hide stale manual overrides."""
-    with connect_profile() as connection:
+    with connect_app() as connection:
         row = connection.execute(
             "SELECT id, profile_json FROM business_profiles WHERE owner_id = ?", (user_id,),
         ).fetchone()
@@ -767,7 +792,7 @@ def decide_profile_suggestion(user_id: str, field_name: str, source_url: str, *,
     if field_name not in allowed_fields:
         return "not_found"
     now = now_utc()
-    with connect_profile() as connection:
+    with connect_app() as connection:
         profile_row = connection.execute(
             "SELECT id, profile_json, profile_version FROM business_profiles WHERE owner_id = ?",
             (user_id,),
@@ -833,7 +858,7 @@ def claim_site_analysis(user_id: str) -> tuple[str, dict] | str | None:
     cooldown_from = (now - SITE_SCAN_COOLDOWN).isoformat()
     stale_from = (now - SITE_SCAN_STALE_AFTER).isoformat()
     run_id = secrets.token_hex(16)
-    with connect_profile() as connection:
+    with connect_app() as connection:
         connection.execute("BEGIN IMMEDIATE")
         profile_row = connection.execute(
             "SELECT id, profile_json FROM business_profiles WHERE owner_id = ?",
@@ -888,7 +913,7 @@ def finish_site_analysis(
 ) -> None:
     if status not in {"completed", "failed"}:
         raise ValueError("Invalid site analysis status")
-    with connect_profile() as connection:
+    with connect_app() as connection:
         connection.execute(
             """
             UPDATE profile_site_analysis_runs

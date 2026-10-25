@@ -56,11 +56,11 @@ def test_missing_task_route_uses_mock_instead_of_global_mode(monkeypatch, tmp_pa
     monkeypatch.setenv("ALLOW_CLOUD", "true")
     monkeypatch.setenv("CASE_LLM_API_KEY", "test-secret")
     monkeypatch.setattr("app.llm.router.developer_settings", lambda: {"task_routes": {}})
-    route = resolve_route("heavy", task="news_card", space="demo")
+    route = resolve_route("heavy", task="news_report", space="real")
     assert route.provider == "mock"
     assert route.model == "mock-model"
     outcome = complete_tier([{"role": "user", "content": "task"}], tier="heavy", max_tokens=20,
-                            task="news_card", space="demo")
+                            task="news_report", space="real")
     assert outcome.route.provider == "mock"
     assert outcome.text is None
 

@@ -99,7 +99,7 @@ def test_profile_market_links_are_persisted_idempotently_without_guessing_equiti
 
     init_app_db()
     with connect_app() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 14
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 17
         assert connection.execute("SELECT COUNT(*) FROM profile_market_links").fetchone()[0] == 3
 
 
@@ -111,7 +111,7 @@ def test_news_report_and_manual_insight_refresh_are_cached(monkeypatch, tmp_path
     monkeypatch.setattr("app.main.market_snapshot", lambda: {"items": []})
     generated = []
 
-    def fake_report(_profile, _item):
+    def fake_report(_profile, _item, **_context):
         generated.append(_item.id)
         return {"summary": "Проверяемый тестовый разбор", "evidence_ids": [f"news:{_item.id}"]}
 

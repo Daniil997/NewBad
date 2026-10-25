@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from app.profile.real_taxonomy import REAL_PROFILE_TAXONOMY
 from app.user_store import connect_app, init_app_db, now_utc
 
-BASE_SCORING_VERSION = "real-llm-v5"
+BASE_SCORING_VERSION = "real-llm-v7"
 
 
 def scoring_version() -> str:
@@ -41,7 +41,7 @@ INTEREST_EVENT_MAP = {
 }
 INDUSTRY_EVENT_MAP = {
     "energy_raw_materials": {"commodities_energy", "metals", "precious_metals"},
-    "trade": {"fx", "sanctions_trade", "regulation_tax"},
+    "trade": {"fx", "sanctions_trade", "regulation_tax", "consumption_labor", "inflation_macro"},
     "transport_logistics": {"sanctions_trade", "commodities_energy"},
     "manufacturing": {"commodities_energy", "metals", "regulation_tax"},
     "agriculture": {"commodities_energy", "sanctions_trade", "regulation_tax"},
@@ -108,6 +108,12 @@ def _specific_terms(value: str) -> list[str]:
 
 def evaluate(profile: dict, item) -> dict:
     """Deterministic, evidence-led relevance. One incidental word cannot yield a strong link."""
+    from app.relevance import concepts, exclusion_reason, industry_tags
+
+    excluded = exclusion_reason(profile, item)
+    if excluded:
+        return {"relevant": False, "score": 0.05, "reasons": [excluded],
+                "method": "Проверяемые признаки профиля (real-rules-v4)", "excluded_reason": excluded}
     event = item.event_type or "unknown"
     text = f"{item.title} {item.excerpt}".casefold().replace("ё", "е")
     signals: list[tuple[str, float, str]] = []
@@ -117,7 +123,8 @@ def evaluate(profile: dict, item) -> dict:
             signals.append((key, weight, reason))
 
     company = str(profile.get("company_name") or "").strip()
-    if len(company) >= 7 and _has_phrase(text, company.replace("ё", "е")):
+    generic_name = company.casefold() in {str(profile.get(field) or "").casefold() for field in ("industry", "description")}
+    if len(company) >= 7 and not generic_name and _has_phrase(text, company.replace("ё", "е")):
         add("company", 0.95, "Компания прямо названа в публикации")
 
     for topic in profile.get("focus_topics", []):
@@ -152,12 +159,36 @@ def evaluate(profile: dict, item) -> dict:
         if len(name) >= 6 and _has_phrase(text, name.casefold().replace("ё", "е")):
             add("counterparty", 0.78, f"Упомянут контрагент из платёжных связей: {name}")
             break
-    for tag in profile.get("industry_tags", []):
+    business_concepts = concepts(" ".join(str(profile.get(key) or "") for key in ("industry", "description", "products_services")))
+    news_concepts = concepts(item.title + " " + item.excerpt[:1800])
+    headline_concepts = concepts(item.title)
+    derived_tags = industry_tags(profile)
+    for tag in sorted(derived_tags):
         if event in INDUSTRY_EVENT_MAP.get(tag, set()):
+            if (tag == "trade" and business_concepts & {"fuel", "oil", "gas", "coal", "metals"}
+                    and event == "consumption_labor" and not business_concepts & news_concepts):
+                continue
             if tag == "it_communications" and event == "regulation_tax" and not re.search(r"цифров|связ|информацион|кибер|программ", text):
+                continue
+            if event == "regulation_tax" and not (business_concepts & news_concepts - {"tax"}):
                 continue
             add("industry", 0.52, f"Возможна отраслевая связь: {INDUSTRY_LABELS.get(tag, tag)}")
             break
+
+    direct = (business_concepts & news_concepts) - {"tax", "macro", "rates", "trade", "fx"}
+    if direct:
+        names = {"fuel": "моторное топливо", "property": "нежилая недвижимость и аренда",
+                 "warehousing": "склады", "gas": "газ", "oil": "нефть", "coal": "уголь"}
+        add("business", 0.72, "Событие касается деятельности компании: " + ", ".join(names.get(key, key) for key in sorted(direct)[:2]))
+    if ("trade" in derived_tags and not business_concepts & {"fuel", "oil", "gas", "coal", "metals"}
+            and headline_concepts & {"demand", "warehousing"}):
+        add("industry", 0.55, "Оптовая торговля связана со спросом клиентов и доступностью складов")
+    if "real_estate" in derived_tags and news_concepts & {"warehousing", "property"}:
+        add("business", 0.72, "Событие касается коммерческой недвижимости, помещений или складов")
+    elif "real_estate" in derived_tags and "demand" in headline_concepts:
+        add("industry", 0.40, "Возможная косвенная связь: если среди арендаторов есть торговые компании, изменение спроса влияет на занятость помещений")
+    if "energy_raw_materials" in derived_tags and "fuel" in business_concepts and "fuel" in news_concepts:
+        add("business", 0.78, "Событие касается рынка моторного топлива, указанного в деятельности компании")
 
     regions = [
         str(value).strip() for value in [
@@ -200,13 +231,15 @@ def evaluate(profile: dict, item) -> dict:
         "relevant": score >= WEAK_LINK,
         "score": score,
         "reasons": reasons,
-        "method": "Проверяемые признаки профиля (real-rules-v3)",
+        "method": "Проверяемые признаки профиля (real-rules-v4)",
     }
 
 
 def calibrate_model_result(profile: dict, item, model: dict | None) -> dict:
     """Use LLM only as a bounded supporting judgement, not as unverified certainty."""
     baseline = evaluate(profile, item)
+    if baseline.get("excluded_reason"):
+        return baseline
     if model is None:
         return baseline
     try:
@@ -268,15 +301,16 @@ def enqueue_job(profile_id: str, profile_version: int, candidates: list[str]) ->
     return row["id"] if row else None
 
 
-def missing_candidates(profile_id: str, profile_version: int, items: list) -> list[str]:
+def missing_candidates(profile_id: str, profile_version: int, items: list, *, retry_rules: bool = False) -> list[str]:
     init_app_db()
     hashes = {item.id: article_hash(item) for item in items}
     with connect_app() as connection:
         rows = connection.execute(
-            "SELECT news_id, news_hash FROM profile_news_analysis WHERE profile_id = ? AND profile_version = ? AND scoring_version = ?",
+            "SELECT news_id, news_hash, reasons_json FROM profile_news_analysis WHERE profile_id = ? AND profile_version = ? AND scoring_version = ?",
             (profile_id, profile_version, scoring_version()),
         ).fetchall()
-        existing = {(row["news_id"], row["news_hash"]) for row in rows}
+        existing = {(row["news_id"], row["news_hash"]) for row in rows
+                    if not retry_rules or json.loads(row["reasons_json"]).get("model_checked", False)}
         active = connection.execute(
             "SELECT candidate_ids_json FROM profile_analysis_jobs WHERE profile_id = ? AND profile_version = ? AND status IN ('queued', 'running')",
             (profile_id, profile_version),
@@ -334,11 +368,18 @@ def save_job_results(job: dict, profile: dict, items_by_id: dict, model_results:
             item = items_by_id.get(news_id)
             if item is None:
                 continue
-            result = calibrate_model_result(profile, item, (model_results or {}).get(news_id))
+            model = (model_results or {}).get(news_id)
+            result = calibrate_model_result(profile, item, model)
+            from app.bank_store import bank_evidence
+
+            result["model_checked"] = model is not None and (
+                "bank_source_ids" in model or not bank_evidence(profile, item, limit=1, allow_weak_profile=True)[0]
+            )
             connection.execute(
-                """INSERT OR IGNORE INTO profile_news_analysis
+                """INSERT INTO profile_news_analysis
                 (profile_id, profile_version, news_id, news_hash, scoring_version, relevant, score, reasons_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(profile_id,profile_version,news_id,news_hash,scoring_version)
+                DO UPDATE SET relevant=excluded.relevant,score=excluded.score,reasons_json=excluded.reasons_json,created_at=excluded.created_at""",
                 (job["profile_id"], job["profile_version"], item.id, article_hash(item), scoring_version(),
                  int(result["relevant"]), result["score"], json.dumps(result, ensure_ascii=False), created),
             )
@@ -346,6 +387,10 @@ def save_job_results(job: dict, profile: dict, items_by_id: dict, model_results:
             "UPDATE profile_analysis_jobs SET status = 'succeeded', updated_at = ?, lease_until = NULL WHERE id = ?",
             (created, job["id"]),
         )
+    from app.bank_store import ensure_recommendations
+
+    ensure_recommendations(job["profile_id"], [items_by_id[key] for key in job["candidate_ids"] if key in items_by_id],
+                           model_results, expected_profile_version=job["profile_version"])
 
 
 def fail_job(job_id: str, error: str) -> None:

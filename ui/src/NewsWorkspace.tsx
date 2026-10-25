@@ -141,7 +141,7 @@ export function NewsAnalysis({ facts, meaning, risks, opportunities, nextStep, c
       <div className="news-facts">{facts}</div>
     </section>
     <section className="detail-block">
-      <div className="real-block-heading"><h3>Что это значит для вас</h3><span className="real-layer-tag estimate">Аналитическая оценка</span></div>
+      <div className="real-block-heading"><h3>Что это значит для вас</h3><span className="real-layer-tag estimate">Персональная интерпретация</span></div>
       <div className="report real-report">{meaning}
         {risks || opportunities ? <div className="report-cols">
           <div className="report-col risk"><h4>Потенциальный риск</h4>{risks}</div>
@@ -154,7 +154,7 @@ export function NewsAnalysis({ facts, meaning, risks, opportunities, nextStep, c
   </>;
 }
 
-/** Compare calendar dates to a reference date; demo uses its latest fixture date. */
+/** Compare calendar dates to a reference date. */
 export function inNewsPeriod(date: string, period: string, reference?: string): boolean {
   if (period === "window") return true;
   const today = new Date();

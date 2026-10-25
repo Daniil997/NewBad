@@ -46,7 +46,7 @@ def current_route() -> Route:
     return resolve_route("light")
 
 
-def resolve_route(tier: str = "light", *, task: str | None = None, space: str = "demo") -> Route:
+def resolve_route(tier: str = "light", *, task: str | None = None, space: str = "real") -> Route:
     if task:
         selection = developer_settings().get("task_routes", {}).get(space, {}).get(task, "mock")
         return _task_route("mock" if selection == "inherit" else selection)
@@ -88,7 +88,7 @@ def choose_tools(planned: list[str]) -> PlanChoice:
     return _plan(kept or tools, outcome.route, outcome.tokens)
 
 
-def complete_tier(messages: list[dict[str, str]], *, tier: str, max_tokens: int, task: str | None = None, space: str = "demo") -> TierResult:
+def complete_tier(messages: list[dict[str, str]], *, tier: str, max_tokens: int, task: str | None = None, space: str = "real") -> TierResult:
     if task:
         configured = developer_settings().get("task_routes", {}).get(space, {}).get(task, "mock")
         return _complete_task_route(messages, "mock" if configured == "inherit" else configured, max_tokens)

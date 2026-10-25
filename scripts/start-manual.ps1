@@ -88,13 +88,13 @@ function Stop-NewBad {
     if ($docker) {
         $container = ""
         try {
-            $container = (& docker ps --filter "name=newbad-demo" --format "{{.Names}}" 2>$null | Out-String).Trim()
+            $container = (& docker ps --filter "name=newbad-app" --format "{{.Names}}" 2>$null | Out-String).Trim()
         } catch {
             $container = ""
         }
-        if ($container -match 'newbad-demo') {
-            & docker stop newbad-demo | Out-Null
-            Write-Host "Контейнер newbad-demo остановлен."
+        if ($container -match 'newbad-app') {
+            & docker stop newbad-app | Out-Null
+            Write-Host "Контейнер newbad-app остановлен."
             $stopped = $true
         } else {
             $foreign += "Docker, порт 8000"
@@ -124,13 +124,12 @@ function Show-Banner {
     Write-Host "Ручная проверка NewBad"
     Write-Host "Интерфейс: http://127.0.0.1:5173"
     Write-Host "API:       http://127.0.0.1:8000/docs"
-    Write-Host "Режим берётся из .env."
+    Write-Host "Настройки сервера берутся из .env."
     Write-Host "Остановка: пункт 2 в этом файле или Ctrl+C в окне запуска."
     Write-Host ""
-    Write-Host "В сервисе: войти компанией, открыть карточку, проверить источник и задать вопрос."
-    Write-Host "Для компаний кейса в .env нужно PROFILE_SOURCE=case."
-    Write-Host "Своя новость: блок «Разобрать свою новость»."
-    Write-Host "Режим модели: «Настройки разработки» на главной или на входе."
+    Write-Host "В сервисе: войти по логину и паролю, проверить профиль, открыть новость и задать вопрос."
+    Write-Host "Сбор новостей и котировок: «Обновить данные» в шапке или кнопки в настройках."
+    Write-Host "Модели по задачам: «Настройки разработки» на главной."
     Write-Host ""
 }
 

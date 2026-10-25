@@ -1,27 +1,9 @@
-"""Shared extended company fields and lossless mapping from bank profile features."""
-from math import isfinite
+"""Extended company profile fields and evidence used in personalization."""
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 Presence = Literal["unknown", "yes", "no"]
-
-# source feature -> editable profile field; flags remain distinct from interests.
-BANK_FIELDS = {
-    "ORG_TYPE": "organization_type", "OKFS_NAME": "ownership_form",
-    "COMPANY_AGE_YEARS_GRADATION": "company_age_band", "NEGATIVEMARK": "key_owner_mark",
-    "REVENUE_COMPANY": "annual_revenue", "GROUP_ID": "group_id",
-    "AMOUNT_WORKERS_FNS_GRADATION": "employees_fns_band", "AMOUNT_WORKERS_SPARK_GRADATION": "employees_spark_band",
-    "CL_TYPE": "client_type", "CL_PRODUCT_RKO_MARK": "product_rko", "CL_PRODUCT_GAR_MARK": "product_guarantees",
-    "CL_PRODUCT_LOA_MARK": "product_credit", "CL_PRODUCT_LEA_MARK": "product_leasing",
-    "CL_PRODUCT_DEP_MARK": "product_deposit", "CL_PRODUCT_ZPP_MARK": "product_payroll",
-    "FACTORING_MARK": "product_factoring", "FTS_FLAG": "customs_activity", "FTS_COUNTRY_NAME": "customs_countries",
-    "cohort_share": "cohort_revenue_share", "group_size": "group_size", "group_rank": "group_revenue_rank",
-    "related_persons": "related_person_count", "okved_theme": "okved_theme",
-}
-PRESENCE_FIELDS = {"key_owner_mark", "product_rko", "product_guarantees", "product_credit", "product_leasing",
-                   "product_deposit", "product_payroll", "product_factoring", "customs_activity"}
-NUMERIC_FIELDS = {"annual_revenue", "cohort_revenue_share", "group_size", "group_revenue_rank", "related_person_count"}
 
 
 class ProfileCounterparty(BaseModel):
@@ -75,29 +57,6 @@ class ExtendedProfile(BaseModel):
         if len(keys) != len(set(keys)):
             raise ValueError("Контрагент и направление платежей не должны повторяться")
         return values
-
-
-def extended_seed(original) -> dict:
-    values = {feature.id: feature.value for feature in original.features}
-    seeded = {}
-    for source, key in BANK_FIELDS.items():
-        if source not in values:
-            continue
-        value = values[source]
-        if key in PRESENCE_FIELDS:
-            seeded[key] = {"есть": "yes", "нет": "no"}.get(value, "unknown")
-        elif key in NUMERIC_FIELDS:
-            try:
-                number = float(value)
-                if isfinite(number):
-                    seeded[key] = number if key in {"annual_revenue", "cohort_revenue_share"} else int(number)
-            except (ValueError, TypeError):
-                continue
-        else:
-            seeded[key] = value
-    seeded["cohort_key"] = original.cohort_key or ""
-    seeded["counterparties"] = [item.model_dump() for item in original.counterparties]
-    return ExtendedProfile.model_validate(seeded).model_dump()
 
 
 def extended_evidence(profile: dict) -> dict:

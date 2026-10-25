@@ -143,7 +143,7 @@ def test_ocr_failure_duplicate_and_mismatch_are_visible(tmp_path):
     assert mismatched[0].processed is False
 
 
-def test_inflation_scan_ocr_matches_a_second_read():
+def test_inflation_scan_ocr_matches_a_second_read(tmp_path):
     from app.profile.sources import bank_pdf_dir
 
     pdf_dir = bank_pdf_dir()
@@ -151,7 +151,7 @@ def test_inflation_scan_ocr_matches_a_second_read():
     tessdata = ROOT / "data" / "tessdata" / "rus.traineddata"
     if not pdf.is_file() or not tessdata.is_file():
         pytest.skip("Нет скана инфляции или rus.traineddata")
-    output = ROOT / "data" / "bank" / "extracted"
+    output = tmp_path / "extracted"
     before = hashlib.sha256(pdf.read_bytes()).hexdigest()
     result = ingest_bank_documents(output, only={"inflation"})
     document = result[0]

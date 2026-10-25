@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import "./settings.css";
 import { NewsRecommendations } from "./NewsRecommendations";
+import { BankAnalytics } from "./BankAnalytics";
 
 type SettingsData = {
   news_lookback_days: number; news_retention_days: number; news_max_items: number; news_collection_interval_hours: number;
@@ -29,8 +30,9 @@ type MarketStatus = {
 const SECTIONS = [
   ["news", "Новости", "Источники и сбор"], ["models", "Модели", "Маршруты задач"],
   ["recommendations", "Рекомендации банка", "Оценки для компаний"],
+  ["bank", "Аналитика банка", "Материалы и поиск"],
   ["markets", "Рыночные данные", "Курсы, акции, металлы"], ["analysis", "Персонализация", "Лента и обзор компании"],
-  ["maintenance", "Обслуживание", "Очистка и сброс"],
+  ["maintenance", "Обслуживание", "Очистка новостей"],
 ] as const;
 type Section = typeof SECTIONS[number][0];
 const CATEGORY_LABELS: Record<string, string> = { currencies: "Валюты", equities: "Акции", metals: "Металлы" };
@@ -72,6 +74,7 @@ function Icon({ section }: { section: Section }) {
   const paths: Record<Section, string> = {
     news: "M5 4h14v16H5z M8 8h8 M8 12h8 M8 16h4",
     recommendations: "M4 5h16v12H9l-5 4z M8 9h8 M8 13h5",
+    bank: "M4 4h7v16H4z M13 4h7v16h-7z M7 8h1 M16 8h1",
     models: "M8 8h8v8H8z M9 3v5 M15 3v5 M9 16v5 M15 16v5 M3 9h5 M3 15h5 M16 9h5 M16 15h5",
     markets: "M4 19h16 M6 15l4-5 4 3 5-8",
     analysis: "M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6",
@@ -126,10 +129,15 @@ export function Settings({ onBack }: { onBack: () => void }) {
   }
   useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, []);
   useEffect(() => {
-    if (!news?.collecting || busy === "news") return;
+    const updated = () => { void Promise.all([refreshNews(), refreshMarket()]).catch((reason: Error) => setError(reason.message)); };
+    window.addEventListener("business-data-updated", updated);
+    return () => window.removeEventListener("business-data-updated", updated);
+  }, []);
+  useEffect(() => {
+    if (!news?.collecting) return;
     const timer = window.setInterval(() => { void refreshNews().catch((reason: Error) => setError(reason.message)); }, 4000);
     return () => window.clearInterval(timer);
-  }, [news?.collecting, busy]);
+  }, [news?.collecting]);
   useEffect(() => {
     if (!dirty) return;
     const preventLeave = (event: BeforeUnloadEvent) => { event.preventDefault(); };
@@ -164,7 +172,10 @@ export function Settings({ onBack }: { onBack: () => void }) {
     if (dirty && !await persist()) return;
     setBusy(kind); setError(""); setNotice("");
     try {
-      const result = await request<{ status: string; sources?: SourceResult[]; retention?: { removed_by_age: number; removed_by_count: number } }>(`/api/settings/${kind}/collect`, { method: "POST" });
+      const csrf = await request<{ csrf_token: string }>("/api/auth/csrf");
+      const result = await request<{ status: string; sources?: SourceResult[]; retention?: { removed_by_age: number; removed_by_count: number } }>(`/api/settings/${kind}/collect`, {
+        method: "POST", headers: { "X-CSRF-Token": csrf.csrf_token },
+      });
       if (kind === "news") {
         await refreshNews();
         const added = result.sources?.reduce((sum, item) => sum + item.imported, 0) ?? 0;
@@ -174,18 +185,18 @@ export function Settings({ onBack }: { onBack: () => void }) {
       } else {
         await refreshMarket();
         if (result.status === "error") setError("MOEX не вернула данные. Подробности — в отчёте.");
-        else setNotice("Рыночные данные обновлены.");
+        else setNotice(result.status === "partial" ? "Рыночные данные обновлены частично. Подробности — в отчёте." : "Рыночные данные обновлены.");
       }
+      window.dispatchEvent(new Event("business-data-updated"));
     } catch (reason) { setError((reason as Error).message); }
     finally { setBusy(""); }
   }
-  async function maintenance(kind: "news" | "demo") {
-    const question = kind === "news" ? "Удалить все собранные новости? Профили компаний и рыночные данные сохранятся." : "Сбросить результаты тестового режима: чаты, карточки, кэш и историю запусков?";
-    if (!window.confirm(question)) return;
-    setBusy(kind === "news" ? "clear" : "reset"); setError(""); setNotice("");
+  async function maintenance() {
+    if (!window.confirm("Удалить все собранные новости? Профили компаний и рыночные данные сохранятся.")) return;
+    setBusy("clear"); setError(""); setNotice("");
     try {
-      const result = await request<{ removed?: number }>(kind === "news" ? "/api/settings/news/clear" : "/api/settings/demo/reset", { method: "POST" });
-      if (kind === "news") await refreshNews();
+      const result = await request<{ removed?: number }>("/api/settings/news/clear", { method: "POST" });
+      await refreshNews();
       setNotice(`Готово. Удалено записей: ${result.removed ?? 0}.`);
     } catch (reason) { setError((reason as Error).message); }
     finally { setBusy(""); }
@@ -193,7 +204,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
   function back() { if (!recommendationBusy && (!dirty || window.confirm("Есть несохранённые изменения. Выйти без сохранения?"))) onBack(); }
   function changeSection(next: Section) {
     if (next === section || recommendationBusy) return;
-    if (recommendationDirty && !window.confirm("Есть несохранённая рекомендация. Перейти в другой раздел без сохранения?")) return;
+    if (recommendationDirty && !window.confirm("Есть несохранённые изменения. Перейти в другой раздел без сохранения?")) return;
     setRecommendationDirty(false); setSection(next); setNotice("");
   }
   const totals = (news?.latest?.sources ?? []).reduce((sum, item) => ({
@@ -220,7 +231,8 @@ export function Settings({ onBack }: { onBack: () => void }) {
         {notice && <div className="dev-alert is-success" role="status">{notice}</div>}
         {loading && <div className="dev-card dev-loading" role="status">Загружаем настройки и состояние источников…</div>}
         {section === "recommendations" && <NewsRecommendations onDirtyChange={setRecommendationDirty} onBusyChange={setRecommendationBusy} />}
-        {values && section !== "recommendations" && <form className="dev-form" onSubmit={(event) => { event.preventDefault(); void persist(); }}>
+        {section === "bank" && <BankAnalytics onDirtyChange={setRecommendationDirty} onBusyChange={setRecommendationBusy} />}
+        {values && section !== "recommendations" && section !== "bank" && <form className="dev-form" onSubmit={(event) => { event.preventDefault(); void persist(); }}>
           <fieldset className="dev-controls" disabled={locked}>
             {section === "news" && <>
               <section className="dev-card">
@@ -249,9 +261,9 @@ export function Settings({ onBack }: { onBack: () => void }) {
               </section>
             </>}
             {section === "models" && <>
-              <section className="dev-card"><div className="dev-card-heading"><div><h3>Модели по задачам</h3><p>Отдельный маршрут для каждой задачи и режима приложения.</p></div></div><p className="dev-callout">{server?.allow_cloud ? "Облачные маршруты разрешены сервером. Для вызова нужен настроенный на сервере ключ." : "Облако выключено на сервере. Выбранный облачный маршрут не сможет выполнить запрос."} Локальный сервер: {server?.local_server === "up" ? "доступен" : "недоступен"}.</p>
-                {([ ["real", "Реальный режим", [["profile_site", "Изучение сайта компании"], ["news_report", "Подробный разбор новости"], ["news_selection", "Персональная подборка"], ["chat", "Чат по профилю"]]], ["demo", "Тестовый режим", [["news_card_fact", "Извлечение факта"], ["news_card_copy", "Анализ и выводы"], ["chat", "Чат тестового режима"]]] ] as const).map(([space, label, tasks]) => <div className="dev-route-group" key={space}><h4>{label}</h4>{tasks.map(([task, taskLabel]) => <label className="dev-route-row" key={task}><span>{taskLabel}</span><select value={values.task_routes[space]?.[task] || "mock"} onChange={(e) => update("task_routes", { ...values.task_routes, [space]: { ...values.task_routes[space], [task]: e.target.value } })}>{ROUTE_OPTIONS.map(([value, name]) => <option value={value} key={value}>{name}</option>)}</select></label>)}</div>)}
-                <p className="dev-footnote">Ключ API и разрешение облака задаются на сервере. Сбор RSS и котировок не вызывает модель.</p>
+              <section className="dev-card"><div className="dev-card-heading"><div><h3>Модели по задачам</h3><p>Отдельный маршрут для каждой задачи.</p></div></div><p className="dev-callout">{server?.allow_cloud ? "Облачные маршруты разрешены сервером. Для вызова нужен настроенный на сервере ключ." : "Облако выключено на сервере. Выбранный облачный маршрут не сможет выполнить запрос."} Локальный сервер: {server?.local_server === "up" ? "доступен" : "недоступен"}.</p>
+                {([ ["real", "Реальный режим", [["profile_site", "Изучение сайта компании"], ["news_report", "Подробный разбор новости"], ["news_selection", "Персональная подборка"], ["chat", "Чат по профилю"]]],  ] as const).map(([space, label, tasks]) => <div className="dev-route-group" key={space}><h4>{label}</h4>{tasks.map(([task, taskLabel]) => <label className="dev-route-row" key={task}><span>{taskLabel}</span><select value={values.task_routes[space]?.[task] || "mock"} onChange={(e) => update("task_routes", { ...values.task_routes, [space]: { ...values.task_routes[space], [task]: e.target.value } })}>{ROUTE_OPTIONS.map(([value, name]) => <option value={value} key={value}>{name}</option>)}</select></label>)}</div>)}
+                <p className="dev-footnote">«Персональная подборка» также проверяет соответствие аналитики банка новости и профилю компании. «Подробный разбор новости» и «Чат по профилю» используют подобранные материалы при объяснении влияния событий. Сохранение материалов, поиск по библиотеке, сбор RSS и котировок работают без модели. Обзор компании собирается из готовых результатов. Ключ API и разрешение облака задаются на сервере.</p>
               </section>
               <section className="dev-card"><h3>Проверка ответов</h3><label className="dev-toggle"><span><strong>Подтверждение чисел в чате</strong><small>Отклонять ответы, если числа не подтверждены указанными материалами.</small></span><input type="checkbox" checked={values.validate_numeric_grounding} onChange={(e) => update("validate_numeric_grounding", e.target.checked)} /></label></section>
             </>}
@@ -263,7 +275,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
               <section className="dev-card"><h3>Персональная новостная лента</h3><p className="dev-description">Оценки используют профиль компании и выбранный маршрут модели. При недоступности модели применяются правила. Анализ запускается при открытии ленты или вручную.</p><div className="dev-fields is-two"><label className="dev-full-width">Когда анализировать новости<select value={values.personal_analysis_trigger} onChange={(e) => update("personal_analysis_trigger", e.target.value)}><option value="first_then_manual">При первом открытии, затем вручную</option><option value="on_new_interval">При открытии, если есть новые новости и прошёл интервал</option><option value="manual">Только вручную</option></select></label><label>Интервал анализа<Schedule extended disabled={values.personal_analysis_trigger !== "on_new_interval"} value={values.personal_analysis_interval_hours} onChange={(v) => update("personal_analysis_interval_hours", v)} /></label><label>Новостей за один запуск<input required type="number" min={1} max={100} value={values.personal_analysis_max_candidates} onChange={(e) => update("personal_analysis_max_candidates", Number(e.target.value))} /><small>Лимит анализа, а не сбора RSS</small></label></div></section>
               <section className="dev-card"><h3>Обзор компании</h3><p className="dev-description">Обзор собирается из сохранённых оценок новостей и рыночных данных. Интервал проверяется при открытии профиля.</p><div className="dev-fields is-two"><label className="dev-full-width">Когда обновлять обзор<select value={values.insight_refresh_mode} onChange={(e) => update("insight_refresh_mode", e.target.value)}><option value="manual">Только вручную</option><option value="interval">При открытии, если прошёл интервал</option></select></label><label>Интервал обновления<Schedule extended disabled={values.insight_refresh_mode !== "interval"} value={values.insight_refresh_interval_hours} onChange={(v) => update("insight_refresh_interval_hours", v)} /></label><label>Хранить сводки, дней<input required type="number" min={1} max={3650} value={values.insight_retention_days} onChange={(e) => update("insight_retention_days", Number(e.target.value))} /></label></div></section>
             </>}
-            {section === "maintenance" && <section className="dev-card dev-maintenance"><h3>Управление данными</h3><p className="dev-description">Для повторной проверки сценариев. Удаление потребует подтверждения.</p><div><h4>Очистить собранные новости</h4><p>Удалить публикации из общей базы. Следующий сбор загрузит доступные материалы заново.</p><button type="button" className="dev-button is-danger" disabled={locked || news?.collecting} onClick={() => void maintenance("news")}>{busy === "clear" ? "Очищаем…" : "Очистить базу новостей"}</button></div><div><h4>Сбросить тестовый режим</h4><p>Удалить чаты, сгенерированные карточки, кэш и историю запусков. Встроенные компании и исходные материалы сохраняются.</p><button type="button" className="dev-button is-danger" disabled={locked} onClick={() => void maintenance("demo")}>{busy === "reset" ? "Сбрасываем…" : "Сбросить тестовые данные"}</button></div></section>}
+            {section === "maintenance" && <section className="dev-card dev-maintenance"><h3>Управление данными</h3><p className="dev-description">Удаление собранных публикаций потребует подтверждения.</p><div><h4>Очистить собранные новости</h4><p>Удалить публикации из общей базы. Следующий сбор загрузит доступные материалы заново.</p><button type="button" className="dev-button is-danger" disabled={locked || news?.collecting} onClick={() => void maintenance()}>{busy === "clear" ? "Очищаем…" : "Очистить базу новостей"}</button></div></section>}
           </fieldset>
           <footer className="dev-save-bar"><div><span className={`dev-dot ${dirty ? "is-dirty" : "is-on"}`} /><span>{dirty ? "Есть несохранённые изменения" : "Все изменения сохранены"}<small>Настройки всех разделов</small></span></div><div><button className="dev-button is-secondary" type="button" disabled={!dirty || locked} onClick={() => { setValues(baseline); setNotice(""); setError(""); }}>Отменить</button><button className="dev-button" type="submit" disabled={!dirty || locked}>{busy === "save" ? "Сохраняем…" : "Сохранить настройки"}</button></div></footer>
         </form>}

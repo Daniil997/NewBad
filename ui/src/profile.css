@@ -1,4 +1,4 @@
-/* Shared company profile for real and test modes. */
+/* Company workspace styles. */
 .real .bank-main.company-profile-main { max-width: 1200px; padding: 30px 28px 40px; }
 .bank:has(.cp-page) { background: #f6f7f9; min-height: 100vh; }
 .cp-page { --cp-red: #e52b23; --cp-muted: #838995; --cp-border: #e7e9ee; color: #272d37; font-size: 14px; }
@@ -11,7 +11,6 @@
 .cp-back { padding: 0; color: #7a818d; background: none; border: 0; font-size: 12px !important; }
 .cp-back:hover { color: var(--cp-red); }
 .cp-mode { font-size: 10px; color: #498570; background: #edf5f1; border: 1px solid #dcebe3; border-radius: 6px; padding: 5px 9px; }
-.cp-mode.is-demo { color: #947642; background: #fbf5e9; border-color: #eee3c8; }
 .cp-heading { margin-bottom: 30px; }
 .cp-eyebrow { margin: 0; color: #9298a2; text-transform: uppercase; letter-spacing: .075em; font-size: 10px; font-weight: 600; }
 .cp-heading h1 { font-size: clamp(27px, 3vw, 35px); letter-spacing: -.035em; margin: 8px 0; line-height: 1.15; font-weight: 700; }
