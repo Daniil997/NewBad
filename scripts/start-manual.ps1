@@ -1,4 +1,4 @@
-﻿# Ручной запуск, остановка и перезапуск. Вызывается из start-manual.bat.
+﻿# Ручной запуск, остановка и перезапуск. Вызывается из Windows_start.bat.
 param(
     [Parameter(Position = 0)]
     [string]$Action = ""

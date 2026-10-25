@@ -16,6 +16,8 @@ git-develop.ps1
 __pycache__/
 *.pyc
 .venv/
+.venv-linux/
+/.newbad-run/
 venv/
 .pytest_cache/
 .ruff_cache/

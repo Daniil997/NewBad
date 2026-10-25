@@ -1,5 +1,7 @@
 .git
 .venv
+.venv-linux
+.newbad-run
 venv
 **/__pycache__
 **/*.pyc
