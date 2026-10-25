@@ -15,7 +15,7 @@ from xml.etree import ElementTree
 
 import httpx
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.db import ROOT
 
@@ -28,7 +28,7 @@ _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _EXCERPT = 600
 _MAX_ARTICLE_TEXT = 20000
 _MAX_ARTICLE_BYTES = 2 * 1024 * 1024
-_MAX_ARTICLE_FETCHES = 60
+_MAX_ARTICLE_FETCHES = 120
 _MIN_TEXT = 40
 _MIN_ARTICLE_TEXT = 200
 _SIMILAR = 0.8
@@ -50,6 +50,8 @@ class NewsSource(BaseModel):
     timeout_s: float = 15
     min_interval_s: float = 30
     article_mode: str = "rss_only"
+    description: str = ""
+    max_article_fetches: int = Field(default=120, ge=1, le=200)
 
 
 class ImportedNews(BaseModel):
@@ -80,6 +82,9 @@ class NewsImport(BaseModel):
     rejected: list[RejectedNews]
     seen: int = 0
     article_fetches: int = 0
+    deferred_articles: int = 0
+    article_errors: int = 0
+    deferred_by_time: int = 0
 
 
 class CatalogImport(BaseModel):
@@ -100,6 +105,7 @@ def import_news(
     max_age_days: int | None = None,
     known_items: list[ImportedNews] | None = None,
     persist_files: bool = True,
+    article_client: httpx.Client | None = None,
 ) -> NewsImport:
     """Читает ленту, нормализует записи и пишет только принятые новости. Повтор URL или похожий заголовок — дубль."""
     origin = source or load_news_source()
@@ -121,16 +127,43 @@ def import_news(
     accepted: list[ImportedNews] = []
     rejected: list[RejectedNews] = []
     article_fetches = 0
+    deferred_articles = 0
+    article_errors = 0
+    deferred_by_time = 0
     current_day = loaded_on or date.today()
+    known_by_url = {item.url.rstrip("/"): item for item in known if item.status == "imported"}
+    fetch_limit = min(origin.max_article_fetches, _MAX_ARTICLE_FETCHES)
+    article_deadline = time.monotonic() + 90
+    article_cache: dict[str, str | None] = {}
+
+    def get_article(url: str) -> str | None:
+        nonlocal article_errors, article_fetches
+        cache_key = urlsplit(url)._replace(fragment="").geturl()
+        if cache_key in article_cache:
+            return article_cache[cache_key]
+        article_fetches += 1
+        try:
+            timeout = min(origin.timeout_s, max(1, article_deadline - time.monotonic()))
+            if fetch_article:
+                page = fetch_article(url)
+            elif article_client is not None:
+                page = _fetch_article(url, origin, timeout, client=article_client)
+            else:
+                page = _fetch_article(url, origin, timeout)
+        except (httpx.HTTPError, ValueError, UnicodeError):
+            article_errors += 1
+            page = None
+        article_cache[cache_key] = page
+        return page
     # Some feeds list hundreds of old messages before the newest. Reserve full
     # article requests for valid, recent entries instead of spending the whole
     # budget on stale RSS links.
     by_recent_date = sorted(
         raw_items,
-        key=lambda raw: _published(
+        key=lambda raw: (bool((_item_url(raw) or "").rstrip("/") not in known_by_url), _published(
             _child_local(raw, "pubDate") or _child_local(raw, "published")
             or _child_local(raw, "updated") or _child_local(raw, "date")
-        ) or "",
+        ) or ""),
         reverse=True,
     )
     for raw in by_recent_date:
@@ -139,6 +172,16 @@ def import_news(
             or _child_local(raw, "updated") or _child_local(raw, "date")
         )
         item_url = _item_url(raw)
+        # Some official feeds still publish HTTP permalinks. Fetch only their
+        # same-host HTTPS equivalent; redirects retain the existing host checks.
+        if item_url and urlsplit(item_url).scheme == "http":
+            source_host = (urlsplit(origin.url).hostname or "").removeprefix("www.")
+            if (urlsplit(item_url).hostname or "").removeprefix("www.") == source_host:
+                item_url = "https:" + item_url[5:]
+                for node in raw:
+                    if node.tag.rsplit("}", 1)[-1].casefold() == "link" and node.text:
+                        node.text = item_url
+                        break
         if published is not None and max_age_days is not None:
             delta = (current_day - date.fromisoformat(published)).days
             if delta > max_age_days:
@@ -152,23 +195,44 @@ def import_news(
                 ))
                 continue
         article_fetcher = None
+        deferred_reason = ""
+        previous = known_by_url.get((item_url or "").rstrip("/"))
+        rss_body = _html_to_text(
+            _child_local(raw, "encoded") or _child_local(raw, "content")
+            or _child_local(raw, "description") or _child_local(raw, "summary")
+        )
+        reusable = (
+            previous is not None and previous.published_at == published
+            and previous.title == _plain(_child_local(raw, "title"))
+            and len(previous.text) >= 1600 and len(rss_body) <= len(previous.text)
+        )
         if (
             origin.article_mode == "html"
-            and article_fetches < _MAX_ARTICLE_FETCHES
             and item_url is not None
             and published is not None
         ):
             # Long content:encoded bodies are already full enough; do not waste
             # network calls on them unless an explicit fetcher was supplied.
-            rss_body = _html_to_text(
-                _child_local(raw, "encoded") or _child_local(raw, "content")
-                or _child_local(raw, "description") or _child_local(raw, "summary")
-            )
-            if fetch_article is not None or len(rss_body) < 1600:
-                article_fetcher = fetch_article or (lambda url: _fetch_article(url, origin, origin.timeout_s))
-                article_fetches += 1
+            if reusable:
+                def cached_article(_url: str, text: str = previous.text) -> str:
+                    return text
+                article_fetcher = cached_article
+            elif fetch_article is not None or len(rss_body) < 1600:
+                if urlsplit(item_url)._replace(fragment="").geturl() in article_cache:
+                    article_fetcher = get_article
+                elif time.monotonic() >= article_deadline:
+                    deferred_articles += 1
+                    deferred_by_time += 1
+                    deferred_reason = "достигнут лимит времени загрузки страниц"
+                elif article_fetches < fetch_limit:
+                    article_fetcher = get_article
+                else:
+                    deferred_articles += 1
+                    deferred_reason = "достигнут лимит загрузки страниц"
         item, reason = _normalize(raw, origin, loaded_at, fetch_article=article_fetcher)
         if item is None and reason is not None:
+            if deferred_reason and len(rss_body) < _MIN_TEXT:
+                reason = reason.model_copy(update={"reason": deferred_reason})
             rejected.append(reason)
             continue
         earlier = _duplicate(item, [*known, *accepted])
@@ -177,6 +241,7 @@ def import_news(
             continue
         accepted.append(item)
         known.append(item)
+        known_by_url[item.url.rstrip("/")] = item
     batch = NewsImport(
         source_id=origin.id,
         source=origin.name,
@@ -186,6 +251,9 @@ def import_news(
         rejected=rejected,
         seen=len(raw_items),
         article_fetches=article_fetches,
+        deferred_articles=deferred_articles,
+        article_errors=article_errors,
+        deferred_by_time=deferred_by_time,
     )
     if persist_files:
         _write(output, batch)
@@ -267,7 +335,7 @@ def load_news_sources(path: Path | None = None) -> list[NewsSource]:
     return sources
 
 
-def import_news_catalog(output: Path, *, max_age_days: int = 3) -> CatalogImport:
+def import_news_catalog(output: Path, *, max_age_days: int = 14) -> CatalogImport:
     from app.news_store import imported_news, store_imported_news
 
     started = datetime.now(timezone.utc).isoformat()
@@ -275,13 +343,19 @@ def import_news_catalog(output: Path, *, max_age_days: int = 3) -> CatalogImport
     known = [ImportedNews.model_validate({**item, "status": "imported"}) for item in imported_news()]
     for source in load_news_sources():
         try:
-            batch = import_news(
-                output, source=source, max_age_days=max_age_days,
-                known_items=known, persist_files=False,
-            )
+            # Reuse TLS connections instead of creating a new client for every page.
+            with httpx.Client() as client:
+                batch = import_news(
+                    output, source=source, max_age_days=max_age_days,
+                    known_items=known, persist_files=False, article_client=client,
+                )
             new_items = [item for item in batch.items if item.status == "imported"]
-            # Store duplicates too: the same article may now have a longer, better-extracted body.
-            store_imported_news(source.id, [item.model_dump() for item in batch.items])
+            # Enrich existing URLs, but do not reinsert semantic duplicates under a new URL.
+            known_urls = {item.url.rstrip("/") for item in known}
+            stored = store_imported_news(source.id, [
+                item.model_dump() for item in batch.items
+                if item.status == "imported" or item.duplicate_of == item.id or item.url.rstrip("/") in known_urls
+            ])
             known.extend(new_items)
             rejected_content = [
                 row for row in batch.rejected
@@ -299,7 +373,9 @@ def import_news_catalog(output: Path, *, max_age_days: int = 3) -> CatalogImport
             results.append({
                 "source_id": source.id, "source": source.name, "status": batch.status,
                 "seen": batch.seen, "article_fetches": batch.article_fetches,
-                "imported": sum(item.status == "imported" for item in batch.items),
+                "deferred_articles": batch.deferred_articles, "article_errors": batch.article_errors,
+                "deferred_by_time": batch.deferred_by_time,
+                "imported": stored,
                 "duplicates": sum(item.status == "duplicate" for item in batch.items),
                 "rejected": len(rejected_content), "skipped_old": skipped_old,
                 "skipped_future": skipped_future, "rejection_reasons": rejection_reasons,
@@ -310,7 +386,7 @@ def import_news_catalog(output: Path, *, max_age_days: int = 3) -> CatalogImport
                 "source_id": source.id, "source": source.name, "status": "error",
                 "imported": 0, "duplicates": 0, "rejected": 0,
                 "seen": 0, "article_fetches": 0, "skipped_old": 0, "skipped_future": 0,
-                "error": error.kind,
+                "error": error.kind, "error_message": str(error),
             })
     statuses = [item["status"] for item in results]
     status = "error" if statuses and all(item == "error" for item in statuses) else "partial" if "error" in statuses else "complete"
@@ -374,14 +450,16 @@ def migrate_legacy_imports(output: Path) -> int:
     return moved
 
 
-def _get_official_page(url: str, timeout_s: float, headers: dict[str, str]) -> httpx.Response:
+def _get_official_page(
+    url: str, timeout_s: float, headers: dict[str, str], *, client: httpx.Client | None = None,
+) -> httpx.Response:
     """Follow only bounded same-site HTTPS redirects from official sources."""
     original = urlsplit(url)
     root_host = (original.hostname or "").casefold().removeprefix("www.")
     allowed = {root_host, f"www.{root_host}"}
     current_url = url
     for _ in range(4):
-        response = httpx.get(
+        response = (client.get if client is not None else httpx.get)(
             current_url, timeout=timeout_s, follow_redirects=False, headers=headers,
         )
         if response.status_code not in {301, 302, 303, 307, 308}:
@@ -425,7 +503,8 @@ def _fetch_rss(url: str, timeout_s: float) -> str:
 
 def _items(payload: str) -> list[ElementTree.Element]:
     root = ElementTree.fromstring(payload.lstrip("\ufeff"))
-    local_name = lambda node: node.tag.rsplit("}", 1)[-1].casefold()
+    def local_name(node: ElementTree.Element) -> str:
+        return node.tag.rsplit("}", 1)[-1].casefold()
     if local_name(root) == "feed":
         return [node for node in root if local_name(node) == "entry"]
     channel = next((node for node in root if local_name(node) == "channel"), None)
@@ -638,7 +717,9 @@ def _child_local(raw: ElementTree.Element, name: str) -> str:
 class _ArticleTextParser(HTMLParser):
     """Extract readable article text while suppressing navigation and boilerplate."""
 
-    _SKIP = {"script", "style", "noscript", "svg", "nav", "footer", "header", "aside", "form", "button", "iframe", "template", "select", "option"}
+    # ASP.NET sites can wrap the entire article in a form. Skip controls, not the form itself.
+    _SKIP = {"head", "script", "style", "noscript", "svg", "nav", "footer", "header", "aside", "button", "iframe", "template", "select", "option", "label", "textarea"}
+    _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
     _BLOCK = {"p", "div", "br", "li", "h1", "h2", "h3", "h4", "section", "article", "main", "tr"}
 
     def __init__(self) -> None:
@@ -661,13 +742,16 @@ class _ArticleTextParser(HTMLParser):
             score = 100 if tag == "article" else 80 if tag == "main" else 0
             if re.search(r"article[-_ ]?(body|content|text)|news[-_ ]?(body|content|text)|press[-_ ]?(body|content|text)|detail[-_ ]?content", marker):
                 score = max(score, 90)
+            elif re.search(r"landing-text|text_block|single-news__text", marker):
+                score = max(score, 90)
             elif re.search(r"content|article|news|press|detail|story", marker):
                 score = max(score, 45)
             if score:
                 candidate_id = len(self.candidates)
                 self.candidates.append((score, []))
                 self.active.append(candidate_id)
-        self.stack.append((tag, skipped, candidate_id))
+        if tag not in self._VOID:
+            self.stack.append((tag, skipped, candidate_id))
         if not skipped and tag == "a":
             self.anchor_depth += 1
             self.anchor_count += 1
@@ -723,8 +807,6 @@ class _ArticleTextParser(HTMLParser):
             and len(body) >= 700
             and self.anchor_chars / max(len(body), 1) >= 0.35
         )
-        if link_heavy_listing:
-            return ""
         eligible = [
             (score, _strip_page_boilerplate(_SPACE.sub(" ", " ".join(parts)).strip()))
             for score, parts in self.candidates
@@ -737,6 +819,8 @@ class _ArticleTextParser(HTMLParser):
             # global footer includes page-feedback controls.
             if score >= 90 and len(candidate_text) >= _MIN_ARTICLE_TEXT:
                 return candidate_text
+        if link_heavy_listing:
+            return ""
         if page_chrome:
             # A section/index page without a focused article is not a news story.
             return ""
@@ -786,7 +870,7 @@ def _limit_article_text(value: str) -> str:
     return clipped or text[:_MAX_ARTICLE_TEXT]
 
 
-def _fetch_article(url: str, source: NewsSource, timeout_s: float) -> str | None:
+def _fetch_article(url: str, source: NewsSource, timeout_s: float, *, client: httpx.Client | None = None) -> str | None:
     parsed = urlsplit(url)
     source_host = (urlsplit(source.url).hostname or "").casefold()
     article_host = (parsed.hostname or "").casefold()
@@ -798,6 +882,7 @@ def _fetch_article(url: str, source: NewsSource, timeout_s: float) -> str | None
     response = _get_official_page(
         url, timeout_s,
         {"User-Agent": "NewBad/0.1 (+official RSS article extraction)", "Accept": "text/html,application/xhtml+xml"},
+        client=client,
     )
     response.raise_for_status()
     if len(response.content) > _MAX_ARTICLE_BYTES:

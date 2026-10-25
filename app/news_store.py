@@ -90,3 +90,14 @@ def stored_news_count() -> int:
     init_app_db()
     with connect_app() as connection:
         return int(connection.execute("SELECT COUNT(*) FROM news_articles").fetchone()[0])
+
+
+def recent_news_count(lookback_days: int) -> int:
+    if not app_db_path().is_file():
+        return 0
+    cutoff = (date.today() - timedelta(days=lookback_days)).isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    with connect_app() as connection:
+        return int(connection.execute(
+            "SELECT COUNT(*) FROM news_articles WHERE published_at BETWEEN ? AND ?", (cutoff, tomorrow),
+        ).fetchone()[0])

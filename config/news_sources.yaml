@@ -1,4 +1,5 @@
-# Официальные RSS-ленты Банка России. Список опубликован на cbr.ru/development/RSS/.
+# Первоисточники и тематические RSS деловых СМИ. Для СМИ сохраняется только
+# опубликованный в RSS текст, без загрузки страниц статей и обхода платного доступа.
 sources:
   - id: cbr_press
     name: Банк России — пресс-релизы
@@ -6,20 +7,49 @@ sources:
     timeout_s: 15
     min_interval_s: 30
     article_mode: html
+    description: Решения регулятора и денежно-кредитная политика.
   - id: cbr_events
     name: Банк России — новости, интервью и выступления
     url: https://www.cbr.ru/rss/eventrss
     timeout_s: 15
     min_interval_s: 30
     article_mode: html
+    description: Публикации, выступления и комментарии регулятора.
   - id: cbr_news
     name: Банк России — новости сайта
     url: https://www.cbr.ru/rss/RssNews
     timeout_s: 15
     min_interval_s: 30
     article_mode: html
+    description: Обновления сайта, включая разделы и документы без текста статьи. Такие записи могут быть отклонены.
   - id: cbr_currency
     name: Банк России — курсы валют
     url: https://www.cbr.ru/rss/RssCurrency
     timeout_s: 15
     min_interval_s: 30
+    description: Ежедневная сводка курсов; обычно одна запись в ленте.
+  - id: fns_news
+    name: ФНС России — новости
+    url: https://www.nalog.gov.ru/rn77/rss/
+    timeout_s: 15
+    min_interval_s: 60
+    article_mode: html
+    description: Налоги, отчётность и изменения для бизнеса. Публичная лента ФНС, регион 77.
+  - id: vedomosti_economics
+    name: Ведомости — экономика
+    url: https://www.vedomosti.ru/rss/rubric/economics
+    timeout_s: 15
+    min_interval_s: 60
+    description: Макроэкономика, налоги и регулирование. Только текст из RSS и ссылка на оригинал.
+  - id: vedomosti_business
+    name: Ведомости — бизнес
+    url: https://www.vedomosti.ru/rss/rubric/business
+    timeout_s: 15
+    min_interval_s: 60
+    description: Компании и отрасли. Только текст из RSS и ссылка на оригинал.
+  - id: vedomosti_finance
+    name: Ведомости — финансы
+    url: https://www.vedomosti.ru/rss/rubric/finance
+    timeout_s: 15
+    min_interval_s: 60
+    description: Банки и финансовые рынки. Только текст из RSS и ссылка на оригинал.

@@ -29,6 +29,24 @@ def test_news_developer_settings_persist_and_validate(monkeypatch, tmp_path):
     assert invalid.status_code == 422
 
 
+def test_retention_cannot_discard_news_inside_collection_window():
+    with TestClient(app) as client:
+        response = client.post("/api/settings", json={"news_lookback_days": 30, "news_retention_days": 7})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Некорректные параметры"
+    assert response.json()["fields"] == ["body"]
+
+
+def test_collection_cannot_run_twice_in_parallel():
+    from app.main import _NEWS_COLLECTION_LOCK
+
+    with TestClient(app) as client, _NEWS_COLLECTION_LOCK:
+        response = client.post("/api/settings/news/collect")
+        clear = client.post("/api/settings/news/clear")
+    assert response.status_code == 409
+    assert clear.status_code == 409
+
+
 def test_task_model_settings_round_trip_and_reject_unknown_models(monkeypatch, tmp_path):
     monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "task-routes.sqlite3"))
     routes = {

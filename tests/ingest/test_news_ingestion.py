@@ -54,7 +54,10 @@ def test_configured_source_is_the_cbr_press_feed():
     assert source.name == "Банк России — пресс-релизы"
     assert urlsplit(source.url).netloc == "www.cbr.ru"
     assert source.url.endswith("/rss/RssPress")
-    assert {item.id for item in load_news_sources()} == {"cbr_press", "cbr_events", "cbr_news", "cbr_currency"}
+    sources = {item.id: item for item in load_news_sources()}
+    assert set(sources) == {"cbr_press", "cbr_events", "cbr_news", "cbr_currency", "fns_news",
+                            "vedomosti_economics", "vedomosti_business", "vedomosti_finance"}
+    assert all(source.article_mode == "rss_only" for key, source in sources.items() if key.startswith("vedomosti"))
 
 
 def test_import_normalizes_and_stores_checksum(tmp_path):

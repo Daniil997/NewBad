@@ -11,13 +11,14 @@ import uuid
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
+from threading import Lock
 from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
 from app.agent.chat import ChatReply, answer_from_card
 from app.agent.failure import failure_detail
@@ -34,7 +35,7 @@ from app.corpus.search import (
 )
 from app.db import ROOT, connect, init_db, journal_is_empty, journal_tables
 from app.ingest.news import import_news_catalog, load_news_sources, migrate_legacy_imports
-from app.news_store import clear_stored_news, prune_stored_news, stored_news_count
+from app.news_store import clear_stored_news, prune_stored_news, recent_news_count, stored_news_count
 from app.market_data import collect_market_data, load_market_config
 from app.market_store import latest_market_collection, market_history, market_snapshot, persist_profile_market_links, prune_market_data, record_market_collection, store_observations
 from app.personal_feed import (
@@ -349,6 +350,12 @@ class SettingsUpdate(BaseModel):
     validate_numeric_grounding: bool = True
     task_routes: dict[str, dict[str, str]] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def retention_covers_collection_window(self) -> "SettingsUpdate":
+        if self.news_retention_days < self.news_lookback_days:
+            raise ValueError("Срок хранения новостей должен быть не меньше периода сбора")
+        return self
+
     @field_validator("market_categories")
     @classmethod
     def unique_market_categories(cls, values: list[str]) -> list[str]:
@@ -372,9 +379,19 @@ class SettingsUpdate(BaseModel):
 
 
 _PLACEMENTS = {"auto", "gpu", "ram"}
+_NEWS_COLLECTION_LOCK = Lock()
 
 
 def _collect_news() -> dict:
+    if not _NEWS_COLLECTION_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Сбор новостей уже выполняется. Дождитесь завершения.")
+    try:
+        return _collect_news_locked()
+    finally:
+        _NEWS_COLLECTION_LOCK.release()
+
+
+def _collect_news_locked() -> dict:
     configured = developer_settings()
     output = ROOT / "data" / "news" / "imported"
     migrate_legacy_imports(output)
@@ -1502,11 +1519,16 @@ def settings() -> SettingsView:
 @app.get("/api/settings/news/status")
 def news_collection_status() -> dict:
     latest = latest_news_collection()
+    configured = developer_settings()
     return {
-        "sources": [{"id": item.id, "name": item.name, "url": item.url} for item in load_news_sources()],
+        "sources": [{"id": item.id, "name": item.name, "url": item.url,
+                     "description": item.description, "article_mode": item.article_mode,
+                     "max_article_fetches": item.max_article_fetches} for item in load_news_sources()],
         "latest": latest,
         "stored_count": stored_news_count(),
-        "settings": developer_settings(),
+        "recent_count": recent_news_count(configured["news_lookback_days"]),
+        "settings": configured,
+        "collecting": _NEWS_COLLECTION_LOCK.locked(),
     }
 
 
@@ -1518,8 +1540,13 @@ def collect_news_now() -> dict:
 @app.post("/api/settings/news/clear")
 def clear_news_database() -> dict:
     """Delete only collected news articles so the next collection can rebuild them."""
-    removed = clear_stored_news()
-    return {"status": "complete", "removed": removed, "stored_count": stored_news_count()}
+    if not _NEWS_COLLECTION_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Нельзя очистить базу, пока выполняется сбор новостей.")
+    try:
+        removed = clear_stored_news()
+        return {"status": "complete", "removed": removed, "stored_count": stored_news_count()}
+    finally:
+        _NEWS_COLLECTION_LOCK.release()
 
 
 @app.post("/api/settings/demo/reset")
