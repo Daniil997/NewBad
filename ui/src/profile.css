@@ -53,6 +53,22 @@
 .cp-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .cp-field { display: grid; align-content: start; gap: 9px; min-width: 0; color: #616977; font-size: 11px; font-weight: 550; }
 .cp-field em { font-style: normal; color: #d25247; }
+.cp-minimum-badge { display: inline-block; margin: 0 0 0 8px; padding: 3px 7px; border-radius: 5px; background: #fff0ed; color: #b94235; font-size: 10px; font-weight: 550; vertical-align: middle; }
+.cp-minimum { padding: 20px 23px; border: 1px solid #ead8ac; border-radius: 12px; background: #fffbf0; }
+.cp-minimum h3 { margin: 0; font-size: 15px; color: #665327; }
+.cp-minimum p { margin: 9px 0 0; font-size: 12px; line-height: 1.7; color: #786a4e; }
+.cp-minimum ul { display: flex; flex-wrap: wrap; gap: 12px 25px; padding: 0; margin: 16px 0; list-style: none; }
+.cp-minimum li { display: flex; align-items: start; gap: 9px; flex: 1 1 190px; color: #786a4e; }
+.cp-minimum li > span:first-child { display: grid; place-items: center; width: 23px; height: 23px; flex-shrink: 0; border: 1px solid #e2d4b7; border-radius: 50%; font-size: 11px; }
+.cp-minimum li strong { display: block; font-size: 12px; font-weight: 600; }
+.cp-minimum li small { display: block; margin-top: 4px; font-size: 11px; }
+.cp-minimum li.is-done { color: #48775e; }
+.cp-minimum li.is-done > span:first-child { background: #e9f3ec; border-color: #c5dece; }
+.cp-minimum .cp-minimum-status { padding-top: 12px; border-top: 1px solid #eadfc5; }
+.cp-minimum.is-ready { border-color: #cfe2d6; background: #f0f7f2; }
+.cp-minimum.is-ready h3, .cp-minimum.is-ready p { color: #48775e; }
+.cp-minimum.is-ready .cp-minimum-status { border-color: #d5e5da; }
+.cp-minimum .cp-button { margin-top: 14px; }
 .cp-wide { grid-column: 1 / -1; }
 .cp-field > small { color: #a0a6b0; font-size: 10px; font-weight: 400; line-height: 1.5; }
 .cp-page .cp-field :is(input, textarea, select) { width: 100%; border: 1px solid #dfe3e9; border-radius: 8px; background: #fff; color: #424b58; padding: 11px 12px; line-height: 1.5; font-size: 12px; min-width: 0; }

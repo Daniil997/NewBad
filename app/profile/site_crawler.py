@@ -5,7 +5,7 @@ import ipaddress
 import socket
 import ssl
 import time
-from collections import deque
+import heapq
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from urllib.parse import SplitResult, quote, urljoin, urlsplit, urlunsplit
@@ -21,6 +21,7 @@ MAX_CRAWL_SECONDS = 35
 MAX_REDIRECTS = 3
 ALLOWED_CONTENT_TYPES = {"text/html", "application/xhtml+xml"}
 HIDDEN_TAGS = {"script", "style", "noscript", "svg", "template", "iframe", "object", "form", "nav", "footer", "header", "aside", "button", "select"}
+VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 BLOCK_TAGS = {"p", "div", "section", "article", "main", "li", "br", "h1", "h2", "h3", "h4", "tr", "td", "dt", "dd"}
 
 
@@ -58,18 +59,36 @@ class _VisibleTextParser(HTMLParser):
         self._in_title = False
         self._text: list[str] = []
         self._title: list[str] = []
+        self._stack: list[tuple[str, bool]] = []
+        self._descriptions: list[str] = []
+        self._seen_links: set[str] = set()
         self.links: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.lower()
-        if tag in HIDDEN_TAGS:
+        attributes = dict(attrs)
+        style = attributes.get("style", "") or ""
+        suppressed = (
+            tag in HIDDEN_TAGS or "hidden" in attributes
+            or (attributes.get("aria-hidden") or "").lower() == "true"
+            or "display:none" in style.replace(" ", "").lower()
+        )
+        if tag not in VOID_TAGS:
+            self._stack.append((tag, suppressed))
+        if suppressed and tag not in VOID_TAGS:
             self._hidden += 1
         if tag == "title":
             self._in_title = True
-        if tag == "a" and len(self.links) < 500:
-            href = dict(attrs).get("href")
-            if href:
-                self.links.append(href.strip())
+        if tag in {"a", "z-link"} and len(self.links) < 1000:
+            href = (attributes.get("href") or "").strip()
+            if href and href not in self._seen_links:
+                self._seen_links.add(href)
+                self.links.append(href)
+        if tag == "meta":
+            name = (attributes.get("name") or attributes.get("property") or "").lower()
+            content = _clean_text(attributes.get("content") or "")[:1200]
+            if name in {"description", "og:description"} and content and len(self._descriptions) < 2:
+                self._descriptions.append(content)
         if tag in BLOCK_TAGS and not self._hidden:
             self._text.append(" ")
 
@@ -77,10 +96,18 @@ class _VisibleTextParser(HTMLParser):
         tag = tag.lower()
         if tag == "title":
             self._in_title = False
-        if tag in HIDDEN_TAGS and self._hidden:
-            self._hidden -= 1
+        for index in range(len(self._stack) - 1, -1, -1):
+            if self._stack[index][0] == tag:
+                self._hidden -= sum(hidden for _, hidden in self._stack[index:])
+                del self._stack[index:]
+                break
         if tag in BLOCK_TAGS and not self._hidden:
             self._text.append(" ")
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+        if tag.lower() not in VOID_TAGS:
+            self.handle_endtag(tag)
 
     def handle_data(self, data: str) -> None:
         if self._in_title:
@@ -94,6 +121,10 @@ class _VisibleTextParser(HTMLParser):
 
     @property
     def text(self) -> str:
+        return _clean_text(" ".join(dict.fromkeys([*self._descriptions, self.body_text])))[:MAX_PAGE_TEXT]
+
+    @property
+    def body_text(self) -> str:
         return _clean_text(" ".join(self._text))[:MAX_PAGE_TEXT]
 
 
@@ -118,11 +149,12 @@ def crawl_site(start_url: str) -> CrawlResult:
     pages: list[SitePage] = []
     total_bytes = 0
     fetched_pages = 0
-    queue: deque[tuple[str, int]] = deque([(landing_url, 0)])
+    queue: list[tuple[int, int, str]] = [(-1, 0, landing_url)]
+    queued = {landing_url}
     visited: set[str] = set()
     cached = {landing_url: landing}
     while queue and fetched_pages < MAX_PAGES and time.monotonic() < deadline:
-        url, depth = queue.popleft()
+        _, depth, url = heapq.heappop(queue)
         if url in visited:
             continue
         visited.add(url)
@@ -134,9 +166,11 @@ def crawl_site(start_url: str) -> CrawlResult:
         if response is None:
             try:
                 response = _request_following_same_host(url, host, deadline, MAX_PAGE_BYTES)
-            except SiteFetchError:
+            except SiteFetchError as exc:
+                warnings.append(str(exc))
                 continue
         if response.status < 200 or response.status >= 300:
+            warnings.append(f"Часть страниц сайта недоступна (HTTP {response.status}).")
             continue
         content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
         if content_type not in ALLOWED_CONTENT_TYPES:
@@ -157,8 +191,12 @@ def crawl_site(start_url: str) -> CrawlResult:
             warnings.append("Не удалось разобрать одну из страниц сайта.")
             continue
         page_url = response.url
+        if response.truncated:
+            warnings.append("Большие страницы прочитаны частично из-за ограничения размера.")
         if parser.text:
             pages.append(SitePage(url=page_url, title=parser.title, text=parser.text))
+        if not parser.body_text:
+            warnings.append("Часть страниц не содержит доступного текста без JavaScript; использованы только опубликованные описания, если они есть.")
         if depth >= MAX_DEPTH:
             continue
         # Give scarce crawl slots to public company facts: about, products,
@@ -166,12 +204,13 @@ def crawl_site(start_url: str) -> CrawlResult:
         discovered = {
             target for href in parser.links
             if (target := _safe_same_host_link(page_url, href, host))
-            and target not in visited
+            and target not in visited and target not in queued
         }
         for target in sorted(discovered, key=lambda link: (_profile_link_priority(link), link)):
             if len(queue) + len(visited) >= MAX_PAGES * 8:
                 break
-            queue.append((target, depth + 1))
+            queued.add(target)
+            heapq.heappush(queue, (_profile_link_priority(target), depth + 1, target))
 
     if time.monotonic() >= deadline:
         warnings.append("Истекло время, отведённое на обход сайта.")
@@ -226,7 +265,16 @@ def _request_following_same_host(
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise SiteFetchError("Истекло время ожидания ответа сайта.")
-        response = _request_pinned(parsed, addresses[0], min(5.0, remaining), max_bytes, deadline)
+        for address in addresses[:3]:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise SiteFetchError("Истекло время ожидания ответа сайта.")
+            try:
+                response = _request_pinned(parsed, address, min(5.0, remaining), max_bytes, deadline)
+                break
+            except SiteFetchError:
+                if address == addresses[:3][-1]:
+                    raise
         if response.status not in {301, 302, 303, 307, 308}:
             return response
         if redirect_count >= MAX_REDIRECTS:
@@ -372,7 +420,7 @@ def _canonical_url(url: str) -> str:
     except UnicodeError as exc:
         raise SiteFetchError("Некорректное имя сайта.") from exc
     netloc = host
-    if port and port not in {80, 443}:
+    if port and port != (443 if parsed.scheme.lower() == "https" else 80):
         netloc = f"{host}:{port}"
     path = parsed.path or "/"
     return urlunsplit((parsed.scheme.lower(), netloc, path, parsed.query, ""))
@@ -392,6 +440,8 @@ def _safe_same_host_link(page_url: str, href: str, expected_host: str) -> str | 
     if source.scheme == "https" and parsed.scheme == "http":
         return None
     if parsed.port not in (None, 80, 443):
+        return None
+    if parsed.path.lower().endswith((".pdf", ".jpg", ".png", ".zip", ".xlsx", ".docx", ".js", ".css")):
         return None
     return target
 

@@ -196,3 +196,78 @@ def test_model_receives_multiple_pages_and_only_unfilled_field_names(monkeypatch
     assert "company_name" not in supplied["allowed_fields"]
     assert "dependencies" in supplied["allowed_fields"]
     assert result.suggestions == []
+
+
+def test_brand_can_be_supported_by_the_published_page_title(monkeypatch):
+    _setup_model(monkeypatch, {"suggestions": [{
+        "field": "company_name", "value": "МТС", "evidence": "МТС — связь и цифровые сервисы",
+        "source_index": 0, "confidence": "high",
+    }]})
+    result = site_extract.extract_profile_suggestions([
+        SitePage("https://mts.ru/", "МТС — связь и цифровые сервисы", "Предложения для дома и бизнеса."),
+    ], {})
+    assert result.suggestions[0]["value"] == "МТС"
+
+
+def test_invalid_json_field_types_are_skipped_without_losing_valid_proposals(monkeypatch):
+    valid = {"field": "company_name", "value": "МТС", "evidence": "МТС — связь и цифровые сервисы",
+             "source_index": 0, "confidence": "high"}
+    _setup_model(monkeypatch, {"suggestions": [
+        {**valid, "field": ["company_name"]}, {**valid, "confidence": ["high"]}, valid,
+    ]})
+    result = site_extract.extract_profile_suggestions([
+        SitePage("https://mts.ru/", "МТС — связь и цифровые сервисы", "Услуги связи для компаний."),
+    ], {})
+    assert len(result.suggestions) == 1
+
+
+def test_partial_word_overlap_cannot_substantiate_an_invented_business():
+    assert not site_extract._supported_description(
+        "Производство упаковки и ядерного оружия", "Производство упаковки для магазинов",
+    )
+    assert site_extract._supported_description("B2B", "Решения для клиентов B2B и частных лиц")
+
+
+@pytest.mark.parametrize("evidence", ["Мобильная связь и цифровые сервисы", "Решения кибербезопасности"])
+def test_communications_taxonomy_covers_real_company_wording(evidence):
+    assert site_extract._tag_supported("it_communications", evidence)
+
+
+def test_typographic_dash_is_resolved_to_an_actual_verbatim_source_quote(monkeypatch):
+    _setup_model(monkeypatch, {"suggestions": [{
+        "field": "description", "value": "связь и цифровые сервисы",
+        "evidence": "МТС — связь и цифровые сервисы", "source_index": 0, "confidence": "high",
+    }]})
+    result = site_extract.extract_profile_suggestions([
+        SitePage("https://mts.ru/", "МТС - связь и цифровые сервисы", "Услуги связи для клиентов."),
+    ], {})
+    assert result.suggestions[0]["evidence"] == "МТС - связь и цифровые сервисы"
+    assert site_extract._source_quote("МТС — банковские услуги", "МТС - связь и цифровые сервисы") == ""
+
+
+def test_single_taxonomy_string_still_requires_supported_evidence(monkeypatch):
+    _setup_model(monkeypatch, {"suggestions": [{
+        "field": "industry_tags", "value": "it_communications",
+        "evidence": "Мобильная связь и цифровые сервисы", "source_index": 0, "confidence": "high",
+    }]})
+    result = site_extract.extract_profile_suggestions([
+        SitePage("https://mts.ru/", "МТС", "Мобильная связь и цифровые сервисы"),
+    ], {})
+    assert result.suggestions[0]["value"] == ["it_communications"]
+
+
+def test_model_quote_punctuation_is_replaced_by_original_punctuation():
+    assert site_extract._source_quote(
+        'Официальный сайт - ПАО «Магнит"', 'Официальный сайт - ПАО «Магнит»',
+    ) == 'Официальный сайт - ПАО «Магнит»'
+
+
+def test_office_locations_are_not_treated_as_sales_markets(monkeypatch):
+    _setup_model(monkeypatch, {"suggestions": [{
+        "field": "market_geographies", "value": ["Москва", "Казань"],
+        "evidence": "Наши офисы: Москва, Казань.", "source_index": 0, "confidence": "high",
+    }]})
+    result = site_extract.extract_profile_suggestions([
+        SitePage("https://example.org/", "Адреса", "Наши офисы: Москва, Казань."),
+    ], {})
+    assert result.suggestions == []

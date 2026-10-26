@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { SuggestionsPanel, ProfileSourcesPanel } from "./RealParts";
 import { OrganizationDetails, CompanyMetrics, BankProducts, CustomsDetails, CounterpartiesEditor } from "./ProfileDetails";
 import {
-  EMPTY_PROFILE, PROFILE_FIELD_LABELS, profilePayload, profileProgress, formatDateTime,
+  EMPTY_PROFILE, PROFILE_FIELD_LABELS, PROFILE_MINIMUM_HINT, profilePayload, profileProgress, formatDateTime,
   type BusinessProfile, type Interest, type ProfileOptions, type SavedProfile, type SiteSuggestion,
 } from "./realTypes";
 import "./profile.css";
@@ -50,8 +50,8 @@ async function mutation<T>(url: string, body?: unknown, method = "POST"): Promis
   const csrf = await api<{ csrf_token: string }>("/api/auth/csrf");
   return api<T>(url, { method, headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.csrf_token }, body: body === undefined ? undefined : JSON.stringify(body) });
 }
-function Field({ label, hint, required, wide, children }: { label: string; hint?: string; required?: boolean; wide?: boolean; children: ReactNode }) {
-  return <label className={`cp-field${wide ? " cp-wide" : ""}`}><span>{label}{required && <em> *</em>}</span>{children}{hint && <small>{hint}</small>}</label>;
+function Field({ label, hint, required, minimum, wide, children }: { label: string; hint?: string; required?: boolean; minimum?: string; wide?: boolean; children: ReactNode }) {
+  return <label className={`cp-field${wide ? " cp-wide" : ""}`}><span>{label}{required && <em> *</em>}{minimum && <span className="cp-minimum-badge">{minimum}</span>}</span>{children}{hint && <small>{hint}</small>}</label>;
 }
 function Card({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return <section className="cp-card"><div className="cp-card-head"><h3>{title}</h3>{description && <p>{description}</p>}</div>{children}</section>;
@@ -70,6 +70,7 @@ export function CompanyProfile({ apiBase, initialProfile, onBack, onSaved, onDir
   const [sources, setSources] = useState<SiteSuggestion[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [pages, setPages] = useState<{ url: string; title: string }[] | null>(null);
+  const [openedUrl, setOpenedUrl] = useState("");
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
@@ -123,7 +124,7 @@ export function CompanyProfile({ apiBase, initialProfile, onBack, onSaved, onDir
 
   function change<K extends keyof BusinessProfile>(key: K, value: BusinessProfile[K]) {
     setProfile((current) => ({ ...current, [key]: value, ...(key === "description" && value ? { description_skipped: false } : {}) }));
-    if (key === "website") { setConsent(false); setPages(null); }
+    if (key === "website") { setConsent(false); setPages(null); setOpenedUrl(""); setWarnings([]); }
     setNotice("");
   }
   async function persist(): Promise<ProfileResponse | null> {
@@ -132,7 +133,7 @@ export function CompanyProfile({ apiBase, initialProfile, onBack, onSaved, onDir
     try {
       const data = await mutation<ProfileResponse>(apiBase, profilePayload(profile), "PUT");
       adopt(data);
-      setNotice(data.profile.status === "complete" ? "Профиль сохранён. Изменения будут учтены в подборке новостей." : "Черновик сохранён. Добавьте название и описание или выберите «Пока пропустить».");
+      setNotice(data.profile.status === "complete" ? "Минимум сохранён. Персональная подборка и подробный разбор доступны." : `Черновик сохранён. ${PROFILE_MINIMUM_HINT}`);
       return data;
     } catch (reason) { setError((reason as Error).message); return null; }
     finally { setBusy(""); }
@@ -154,12 +155,15 @@ export function CompanyProfile({ apiBase, initialProfile, onBack, onSaved, onDir
   async function scan() {
     if (!consent || !profile.website.trim()) return;
     if (dirty && !await persist()) return;
-    setBusy("site"); setError(""); setNotice(""); setWarnings([]); setPages(null);
+    setBusy("site"); setError(""); setNotice(""); setWarnings([]); setPages(null); setOpenedUrl("");
     try {
-      const data = await mutation<{ profile?: SavedProfile; suggestions?: SiteSuggestion[]; warnings?: string[]; pages?: { url: string; title: string }[] }>(`${apiBase}/site-analysis`, { consent: true });
+      const data = await mutation<{ status: string; profile?: SavedProfile; suggestions?: SiteSuggestion[]; warnings?: string[]; pages?: { url: string; title: string }[]; opened_url?: string }>(`${apiBase}/site-analysis`, { consent: true });
       if (data.profile) adopt({ profile: data.profile });
       setSuggestions(data.suggestions ?? []); setWarnings(data.warnings ?? []); setPages(data.pages ?? []); setConsent(false);
-      setNotice(data.suggestions?.length ? `Найдено предложений: ${data.suggestions.length}. Проверьте цитаты и подтвердите подходящие данные.` : "Изучение сайта завершено. Новых подтверждаемых данных для пустых полей не найдено.");
+      setOpenedUrl(data.opened_url ?? "");
+      setNotice(data.status === "no_pages" ? "Сайт не удалось прочитать. Подробности указаны ниже; вы можете заполнить профиль вручную или указать другую публичную страницу компании."
+        : data.status === "profile_changed" ? "Адрес сайта изменился. Запустите изучение нового сайта."
+        : data.suggestions?.length ? `Найдено предложений: ${data.suggestions.length}. Проверьте цитаты и подтвердите подходящие данные.` : "Изучение сайта завершено. Новых подтверждаемых данных для пустых полей не найдено.");
     } catch (reason) { setError((reason as Error).message); }
     finally { setBusy(""); }
   }
@@ -179,10 +183,10 @@ export function CompanyProfile({ apiBase, initialProfile, onBack, onSaved, onDir
     return value.map((id) => tags.find((item) => item.id === id)?.label ?? id).join(", ");
   }
   function text(key: TextField, placeholder = "", maxLength = 200) {
-    return <input value={String(profile[key] ?? "")} placeholder={placeholder} maxLength={maxLength} onChange={(e) => change(key, e.target.value)} />;
+    return <input value={String(profile[key] ?? "")} aria-required={key === "company_name" || undefined} placeholder={placeholder} maxLength={maxLength} onChange={(e) => change(key, e.target.value)} />;
   }
   function area(key: "description" | "products_services" | "dependencies" | "external_factors" | "context_note", placeholder: string, maxLength: number, rows = 3) {
-    return <textarea rows={rows} maxLength={maxLength} placeholder={placeholder} value={profile[key]} disabled={key === "description" && profile.description_skipped} onChange={(e) => change(key, e.target.value)} />;
+    return <textarea rows={rows} maxLength={maxLength} placeholder={placeholder} value={profile[key]} aria-required={key === "description" && !profile.description_skipped || undefined} disabled={key === "description" && profile.description_skipped} onChange={(e) => change(key, e.target.value)} />;
   }
 
   return <div className="cp-page">
@@ -190,9 +194,9 @@ export function CompanyProfile({ apiBase, initialProfile, onBack, onSaved, onDir
     <div className="cp-heading"><div><p className="cp-eyebrow">Компания / Профиль</p><h1>Профиль компании</h1><p>Расскажите о бизнесе, чтобы получать подходящие новости и аналитику.</p></div></div>
     <div className="cp-layout">
       <aside className="cp-sidebar">
-        <div className="cp-identity"><div className="cp-avatar" aria-hidden="true">{initials}</div><strong>{profile.company_name || "Ваша компания"}</strong><span>{[profile.city || profile.region, profile.industry].filter(Boolean).join(" · ") || "Добавьте сведения о бизнесе"}</span><div className={`cp-readiness ${complete ? "is-ready" : ""}`}><i />{complete ? "Готов к персонализации" : "Профиль не завершён"}</div></div>
+        <div className="cp-identity"><div className="cp-avatar" aria-hidden="true">{initials}</div><strong>{profile.company_name || "Ваша компания"}</strong><span>{[profile.city || profile.region, profile.industry].filter(Boolean).join(" · ") || "Добавьте сведения о бизнесе"}</span><div className={`cp-readiness ${complete ? "is-ready" : ""}`}><i />{complete ? dirty ? "Минимум заполнен — сохраните профиль" : "Готов к подборке и разбору" : "Не заполнен минимум для запуска"}</div></div>
         <nav className="cp-nav" aria-label="Разделы профиля">{SECTIONS.map((item) => <button type="button" key={item.id} aria-current={section === item.id ? "page" : undefined} className={section === item.id ? "is-active" : ""} onClick={() => navigateSection(item.id)}><svg width="19" height="19" viewBox="0 0 24 24" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={item.icon} /></svg><span><strong>{item.label}</strong><small>{item.hint}</small></span>{item.id === "sources" && suggestions.length > 0 && <b>{suggestions.length}</b>}</button>)}</nav>
-        <div className="cp-progress"><div><strong>Полнота профиля</strong><b>{percent}%</b></div><div className="cp-meter" role="progressbar" aria-label="Полнота профиля" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: `${percent}%` }} /></div><p>{progress.done} из {progress.total} блоков заполнено</p><small>{progress.missing.length ? "Заполняйте постепенно. Сохранить черновик можно в любой момент." : "Основные сведения указаны. Обновляйте их по мере изменений."}</small></div>
+        <div className="cp-progress"><div><strong>Полнота профиля</strong><b>{percent}%</b></div><div className="cp-meter" role="progressbar" aria-label="Полнота профиля" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: `${percent}%` }} /></div><p>{progress.done} из {progress.total} блоков заполнено</p><small>Для запуска не требуется 100%. Дополнительные сведения можно заполнить позже.</small></div>
       </aside>
       <div className="cp-content">
         <div className="cp-section-title"><div><p className="cp-eyebrow">{currentSection.hint}</p><h2>{currentSection.label}</h2></div><span className="cp-state">{dirty ? "Есть изменения" : saved ? `Версия ${saved.profile_version}` : "Загрузка…"}</span></div>
@@ -200,11 +204,21 @@ export function CompanyProfile({ apiBase, initialProfile, onBack, onSaved, onDir
         {notice && <div className="cp-alert is-success" role="status">{notice}</div>}
         {loading ? <div className="cp-card cp-loading" role="status">Загружаем профиль компании…</div> : !saved ? <div className="cp-card"><p>Профиль не удалось загрузить.</p><button type="button" className="cp-button" onClick={() => void load()}>Повторить</button></div> : <form className="cp-form" noValidate onSubmit={(e) => { e.preventDefault(); void persist(); }}>
           <fieldset className="cp-controls" disabled={locked}>
+            {(section === "about" || !complete) && <section className={`cp-minimum${complete ? " is-ready" : ""}`} aria-label="Минимум для запуска">
+              <h3>Минимум для запуска</h3>
+              <p>Для персональной подборки и подробного разбора достаточно двух пунктов. {PROFILE_MINIMUM_HINT}</p>
+              <ul>
+                <li className={profile.company_name.trim() ? "is-done" : ""}><span aria-hidden="true">{profile.company_name.trim() ? "✓" : "1"}</span><span><strong>Название компании</strong><small>{profile.company_name.trim() ? "Заполнено" : "Обязательно"}</small></span></li>
+                <li className={profile.description.trim() || profile.description_skipped ? "is-done" : ""}><span aria-hidden="true">{profile.description.trim() || profile.description_skipped ? "✓" : "2"}</span><span><strong>Описание бизнеса</strong><small>{profile.description.trim() ? "Заполнено" : profile.description_skipped ? "Пропущено по вашему выбору" : "Заполните или отметьте пропуск"}</small></span></li>
+              </ul>
+              <p className="cp-minimum-status" role="status">{complete ? dirty ? "Минимум заполнен. Нажмите «Сохранить профиль», чтобы применить изменения." : "Минимум сохранён. Персональная подборка и подробный разбор доступны." : "После заполнения нажмите «Сохранить профиль». Остальные поля необязательны; 100% заполнения не требуется."}</p>
+              {section !== "about" && <button type="button" className="cp-button is-secondary" onClick={() => navigateSection("about")}>Перейти к нужным полям</button>}
+            </section>}
             {section === "about" && <>
-              <Card title="Основная информация" description="Название и описание — основа персональной подборки. Остальное можно добавить позже.">
-                <div className="cp-fields"><Field label="Название компании или бренда" required wide>{text("company_name", "Например, Северная мануфактура")}</Field><Field label="Сайт компании" hint="Можно указать адрес без https://" wide>{text("website", "company.ru", 500)}</Field><Field label="Страна">{text("country", "Не указана", 100)}</Field><Field label="Регион">{text("region", "Область, край или республика", 150)}</Field><Field label="Город" wide>{text("city", "Где работает компания", 150)}</Field></div>
+              <Card title="Основная информация" description="Название обязательно для запуска. Сайт и географию можно добавить позже.">
+                <div className="cp-fields"><Field label="Название компании или бренда" required minimum="Для запуска" wide>{text("company_name", "Например, Северная мануфактура")}</Field><Field label="Сайт компании" hint="Необязательно. Можно указать адрес без https://" wide>{text("website", "company.ru", 500)}</Field><Field label="Страна">{text("country", "Не указана", 100)}</Field><Field label="Регион">{text("region", "Область, край или республика", 150)}</Field><Field label="Город" wide>{text("city", "Где работает компания", 150)}</Field></div>
               </Card>
-              <Card title="Коротко о бизнесе" description="Чем занимаетесь, что продаёте и для кого. Эти сведения помогают объяснять связь новостей с компанией."><Field label="Описание бизнеса">{area("description", "Например: производим упаковку для пищевых компаний и поставляем её по России", 2000, 4)}</Field><div className="cp-description-foot"><label className="cp-check"><input type="checkbox" checked={profile.description_skipped} disabled={!!profile.description.trim() && !profile.description_skipped} onChange={(e) => change("description_skipped", e.target.checked)} /><span>Пока пропустить описание</span></label><small>{profile.description.length} / 2000</small></div></Card>
+              <Card title="Коротко о бизнесе" description="Чем занимаетесь, что продаёте и для кого. Если пока не готовы описать бизнес, отметьте пропуск — это позволит начать работу."><Field label="Описание бизнеса" required={!profile.description_skipped} minimum="Для запуска или пропуск">{area("description", "Например: производим упаковку для пищевых компаний и поставляем её по России", 2000, 4)}</Field><div className="cp-description-foot"><label className="cp-check"><input type="checkbox" checked={profile.description_skipped} disabled={!!profile.description.trim() && !profile.description_skipped} onChange={(e) => change("description_skipped", e.target.checked)} /><span>Пока пропустить описание</span></label><small>{profile.description.length} / 2000</small></div></Card>
               <OrganizationDetails profile={profile} change={change} /><div className="cp-tip"><span aria-hidden="true">↗</span><div><strong>Можно начать с сайта</strong><p>Помощник предложит данные с цитатами. Вы решите, что добавить в профиль.</p><button type="button" onClick={() => setSection("sources")}>Перейти к заполнению с сайта →</button></div></div>
             </>}
             {section === "metrics" && <CompanyMetrics profile={profile} change={change} />}
@@ -222,7 +236,7 @@ export function CompanyProfile({ apiBase, initialProfile, onBack, onSaved, onDir
             </>}
             {section === "sources" && <>
               <Card title="Помощник по сайту" description="Найдём публичные сведения о компании и предложим заполнить пустые поля. Перед добавлением вы увидите цитаты и ссылки."><Field label="Сайт компании">{text("website", "https://company.ru", 500)}</Field><div className="cp-site-steps"><span><b>1</b> Укажите сайт</span><span><b>2</b> Изучите предложения</span><span><b>3</b> Подтвердите данные</span></div><label className="cp-check cp-site-consent"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /><span>Разрешаю передать текст публичных страниц выбранной модели для анализа. При облачном маршруте текст будет отправлен внешнему провайдеру.</span></label><button type="button" className="cp-button" disabled={!profile.website.trim() || !consent || locked} onClick={() => void scan()}>{busy === "site" ? "Изучаем сайт…" : dirty ? "Сохранить и изучить сайт" : "Изучить сайт"}<span aria-hidden="true">↗</span></button>{busy === "site" && <p className="cp-small" role="status">Читаем доступные страницы и проверяем найденные сведения. Это может занять несколько минут.</p>}{!profile.website.trim() && <p className="cp-small">Сначала укажите адрес сайта компании.</p>}</Card>
-              {pages !== null && <Card title={`Изучено страниц: ${pages.length}`}><details className="cp-pages"><summary>Показать использованные страницы</summary><ul>{pages.map((page) => <li key={page.url}><a href={page.url} target="_blank" rel="noreferrer">{page.title || page.url}</a></li>)}</ul></details>{!pages.length && <p className="cp-small">Проверьте доступность сайта и ограничения robots.txt.</p>}</Card>}
+              {pages !== null && <Card title={`Изучено страниц: ${pages.length}`}>{openedUrl && <p className="cp-small">Сайт перенаправил на <a href={openedUrl} target="_blank" rel="noreferrer">{openedUrl}</a>. Региональная версия сайта может содержать сведения только для выбранного региона.</p>}{pages.length > 0 && <details className="cp-pages"><summary>Показать использованные страницы</summary><ul>{pages.map((page) => <li key={page.url}><a href={page.url} target="_blank" rel="noreferrer">{page.title || page.url}</a></li>)}</ul></details>}{!pages.length && <p className="cp-small">Проверьте доступность сайта и ограничения robots.txt. Страницы, требующие JavaScript или проверки браузера, могут быть недоступны.</p>}</Card>}
               <SuggestionsPanel suggestions={suggestions} warnings={warnings} busy={!!busy} dirty={dirty} label={label} fieldLabels={FIELD_LABELS} onDecide={(item, accept) => void decide(item, accept)} onAcceptAll={() => void decide()} />
               <ProfileSourcesPanel sources={sources} profile={profile} fieldLabels={FIELD_LABELS} label={label} />
               {!suggestions.length && !sources.length && pages === null && <div className="cp-empty"><span aria-hidden="true">⌁</span><strong>Источники появятся здесь</strong><p>После изучения сайта можно проверить и подтвердить найденные сведения. Данные, введённые вручную, сохраняются сразу по кнопке «Сохранить профиль».</p></div>}

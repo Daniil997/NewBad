@@ -1,4 +1,5 @@
 export type User = { id: string; login: string; created_at: string };
+export const PROFILE_MINIMUM_HINT = "Укажите название компании и описание бизнеса или отметьте «Пока пропустить описание», затем сохраните профиль.";
 export type Interest = "interested" | "not_relevant" | "unknown";
 export type Presence = "unknown" | "yes" | "no";
 export type ProfileCounterparty = {

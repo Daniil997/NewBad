@@ -3,7 +3,7 @@ import "./real.css";
 import { CompanyProfile } from "./CompanyProfile";
 import { DataRefreshButton } from "./DataRefresh";
 import {
-  EMPTY_PROFILE, relevanceInfo,
+  EMPTY_PROFILE, PROFILE_MINIMUM_HINT, relevanceInfo,
   type BusinessProfile, type MarketHistory, type RealFeed, type RealMarkets,
   type SavedProfile, type User,
 } from "./realTypes";
@@ -450,8 +450,8 @@ export function RealMode({
         {banners}
         {!profileComplete ? (
           <div className="nudge">
-            <span>Профиль заполнен не полностью, поэтому подборка пока общая. Расскажите о компании, чтобы увидеть, что важно именно вам.</span>
-            <button type="button" className="btn btn-primary small" onClick={() => setEditingProfile(true)}>Дополнить профиль</button>
+            <span><strong>Для персональной подборки и подробного разбора нужен минимум сведений.</strong> {PROFILE_MINIMUM_HINT} Остальные поля необязательны.</span>
+            <button type="button" className="btn btn-primary small" onClick={() => setEditingProfile(true)}>Заполнить минимум</button>
           </div>
         ) : null}
 

@@ -151,3 +151,53 @@ def test_site_analysis_requires_consent_and_writes_empty_fields(monkeypatch, tmp
     assert citations[0]["evidence"] == "Компания ООО Север производит упаковку."
     assert overridden.status_code == 200
     assert after_override == []
+
+
+def test_site_changed_while_model_runs_does_not_return_or_store_old_proposals(monkeypatch, tmp_path):
+    from app.user_store import save_business_profile, user_by_login
+
+    monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "accounts.sqlite3"))
+    monkeypatch.setenv("AUTH_REGISTRATION_ENABLED", "true")
+    monkeypatch.setattr("app.main.resolve_route", lambda *a, **kw: SimpleNamespace(provider="cloud", model="allowed-model"))
+    monkeypatch.setattr("app.main.crawl_site", lambda url: SimpleNamespace(
+        pages=[SimpleNamespace(url=url, title="МТС", text="МТС — цифровые сервисы")], warnings=[],
+    ))
+
+    def extract(pages, profile):
+        owner = user_by_login("changing_site")["id"]
+        save_business_profile(owner, {"website": "https://www.kaspersky.ru"}, "incomplete")
+        return SimpleNamespace(suggestions=[{
+            "field_name": "company_name", "value": "МТС", "source_url": pages[0].url,
+            "source_title": "МТС", "evidence": "МТС — цифровые сервисы", "confidence": 0.9,
+        }], model="allowed-model", provider="cloud", warning="")
+
+    monkeypatch.setattr("app.main.extract_profile_suggestions", extract)
+    with TestClient(app) as client:
+        _register(client, "changing_site")
+        client.put("/api/real/profile", headers=_csrf(client), json={"website": "https://mts.ru"})
+        response = client.post("/api/real/profile/site-analysis", headers=_csrf(client), json={"consent": True})
+        assert response.status_code == 200
+        assert response.json()["status"] == "profile_changed"
+        assert response.json()["profile"]["website"] == "https://www.kaspersky.ru"
+        assert response.json()["suggestions"] == []
+        assert client.get("/api/real/profile/suggestions").json()["suggestions"] == []
+
+
+def test_no_readable_pages_returns_redirect_and_the_actual_reason(monkeypatch, tmp_path):
+    monkeypatch.setenv("APP_DB_PATH", str(tmp_path / "accounts.sqlite3"))
+    monkeypatch.setenv("AUTH_REGISTRATION_ENABLED", "true")
+    monkeypatch.setattr("app.main.resolve_route", lambda *a, **kw: SimpleNamespace(provider="cloud", model="allowed-model"))
+    monkeypatch.setattr("app.main.crawl_site", lambda url: SimpleNamespace(
+        pages=[], warnings=["Сайт не разрешил проверить robots.txt; обход остановлен."],
+        opened_url="https://region.mts.ru/about",
+    ))
+    with TestClient(app) as client:
+        _register(client, "unreadable_site")
+        client.put("/api/real/profile", headers=_csrf(client), json={"website": "https://mts.ru"})
+        response = client.post("/api/real/profile/site-analysis", headers=_csrf(client), json={"consent": True})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "no_pages"
+        assert body["pages_scanned"] == 0
+        assert "robots.txt" in body["warnings"][0]
+        assert body["opened_url"] == "https://region.mts.ru/about"

@@ -91,6 +91,10 @@ _SESSION_COOKIE = "newbad_session"
 _CSRF_COOKIE = "newbad_csrf"
 _LOGIN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$")
 _PASSWORD_SCRYPT = {"n": 2**14, "r": 8, "p": 1}
+_PROFILE_MINIMUM_REQUIRED = (
+    "укажите название компании и описание бизнеса или отметьте «Пока пропустить описание», "
+    "затем сохраните профиль. Остальные поля необязательны."
+)
 
 
 @asynccontextmanager
@@ -842,7 +846,7 @@ def create_profile_news_report(news_id: str, payload: ProfileNewsReportRequest, 
     user = _require_user(request)
     saved = business_profile_for_owner(user["id"])
     if not saved or saved["status"] != "complete":
-        raise HTTPException(status_code=409, detail="Заполните профиль компании для подробного разбора")
+        raise HTTPException(status_code=409, detail=f"Для подробного разбора {_PROFILE_MINIMUM_REQUIRED}")
     news = next((item for item in _fresh_real_news(developer_settings()["news_lookback_days"]) if item.id == news_id), None)
     if news is None:
         raise HTTPException(status_code=404, detail="Новость отсутствует в актуальном официальном окне")
@@ -1008,8 +1012,8 @@ class BankMaterialUpdate(BankMaterialInput):
 
 @app.post("/api/bank/analytics", status_code=201)
 def create_bank_material(payload: BankMaterialInput, request: Request) -> dict:
+    # Shared developer library follows settings access, independent of a company session.
     _check_csrf(request)
-    _require_user(request)
     try:
         document_id = add_text_material(**payload.model_dump())
     except ValueError as exc:
@@ -1020,7 +1024,6 @@ def create_bank_material(payload: BankMaterialInput, request: Request) -> dict:
 @app.put("/api/bank/analytics/{document_id}")
 def update_bank_material(document_id: str, payload: BankMaterialUpdate, request: Request) -> dict:
     _check_csrf(request)
-    _require_user(request)
     try:
         add_text_material(document_id=document_id, **payload.model_dump())
     except LookupError as exc:
@@ -1034,7 +1037,6 @@ def update_bank_material(document_id: str, payload: BankMaterialUpdate, request:
 def delete_bank_material(document_id: str, request: Request,
                          expected_revision: int | None = Query(default=None, ge=0)) -> Response:
     _check_csrf(request)
-    _require_user(request)
     try:
         delete_material(document_id, expected_revision=expected_revision)
     except LookupError as exc:
@@ -1045,9 +1047,8 @@ def delete_bank_material(document_id: str, request: Request,
 
 
 @app.get("/api/bank/analytics")
-def bank_analytics(request: Request, q: str = Query(default="", max_length=2000),
+def bank_analytics(q: str = Query(default="", max_length=2000),
                    limit: int = Query(default=20, ge=1, le=100)) -> dict:
-    _require_user(request)
     with connect_app() as connection:
         documents = [dict(row) for row in connection.execute(
             "SELECT id,title,published_at,period,topic,type,page_count,notes,edited,revision FROM bank_documents WHERE deleted=0 ORDER BY published_at DESC"
@@ -1057,8 +1058,7 @@ def bank_analytics(request: Request, q: str = Query(default="", max_length=2000)
 
 
 @app.get("/api/bank/analytics/{document_id}")
-def bank_analytics_document(document_id: str, request: Request) -> dict:
-    _require_user(request)
+def bank_analytics_document(document_id: str) -> dict:
     with connect_app() as connection:
         document = connection.execute("SELECT * FROM bank_documents WHERE id=? AND deleted=0", (document_id,)).fetchone()
         if document is None:
@@ -1240,7 +1240,7 @@ def analyze_real_feed(request: Request) -> dict:
     user = _require_user(request)
     saved = business_profile_for_owner(user["id"])
     if not saved or saved["status"] != "complete":
-        raise HTTPException(status_code=409, detail="Заполните профиль компании, чтобы запустить персональный анализ")
+        raise HTTPException(status_code=409, detail=f"Для персональной подборки {_PROFILE_MINIMUM_REQUIRED}")
     return _real_feed_payload(user["id"], enqueue_manual=True)
 
 
@@ -1344,6 +1344,9 @@ def _analyze_profile_site(body: SiteAnalysisRequest, user_id: str) -> dict:
             "warnings": crawl.warnings,
             "pages_scanned": 0,
             "pages": [],
+            "opened_url": getattr(crawl, "opened_url", ""),
+            "model": route.model,
+            "provider": route.provider,
         }
     try:
         extracted = extract_profile_suggestions(crawl.pages, profile)
@@ -1361,17 +1364,22 @@ def _analyze_profile_site(body: SiteAnalysisRequest, user_id: str) -> dict:
         raise HTTPException(status_code=502, detail="Не удалось завершить анализ сайта") from exc
     # Store source-backed proposals for explicit user review. A site scan is
     # not permission to overwrite profile data or infer business preferences.
-    suggestions = save_profile_suggestions(user["id"], extracted.suggestions)
+    suggestions = save_profile_suggestions(user["id"], extracted.suggestions, expected_website=website)
     finish_site_analysis(
         run_id, status="completed", pages_scanned=len(crawl.pages),
         model=extracted.model, provider=extracted.provider,
     )
     warnings = [*crawl.warnings]
+    current = business_profile_for_owner(user_id)
+    website_changed = not current or current["profile"].get("website") != website
+    if website_changed:
+        suggestions = []
+        warnings.append("Адрес сайта изменился во время анализа. Изучите новый сайт; старые предложения не сохранены.")
     if extracted.warning:
         warnings.append(extracted.warning)
     return {
-        "status": "suggestions_ready" if suggestions else "no_suggestions",
-        "profile": _profile_view(saved),
+        "status": "profile_changed" if website_changed else "suggestions_ready" if suggestions else "no_suggestions",
+        "profile": _profile_view(current or saved),
         "filled_fields": [],
         "suggestions": suggestions,
         "warnings": warnings,
@@ -1503,7 +1511,11 @@ def _save_profile(body: BusinessProfileInput, user_id: str) -> dict:
     saved = save_business_profile(user_id, profile, status)
     if not saved:
         raise HTTPException(status_code=404, detail="Профиль компании не найден")
-    return {"profile": _profile_view(saved)}
+    return {
+        "profile": _profile_view(saved),
+        "suggestions": pending_profile_suggestions(user_id),
+        "sources": accepted_profile_sources(user_id),
+    }
 
 
 @app.post("/api/auth/logout")

@@ -10,12 +10,8 @@ let activePage;
 try {
   const context = await browser.newContext({ baseURL: "http://127.0.0.1:5175", viewport: { width: 1440, height: 1000 } });
   const api = process.env.BANK_QA_API || "http://127.0.0.1:8000";
-  const csrf = (await (await context.request.get(`${api}/api/auth/csrf`)).json()).csrf_token;
-  const account = await context.request.post(`${api}/api/auth/register`, {
-    headers: { "X-CSRF-Token": csrf },
-    data: { login: `bankqa_${Date.now()}`, password: "synthetic-bank-test-password" },
-  });
-  assert.equal(account.status(), 201);
+  // Developer materials must work in a fresh browser without a user account.
+  assert.equal((await context.request.get(`${api}/api/real/profile`)).status(), 401);
   const page = await context.newPage();
   activePage = page;
   await page.route("**/api/**", async (route) => {

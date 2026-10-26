@@ -58,11 +58,20 @@ def extract_profile_suggestions(pages: list[SitePage], current_profile: dict) ->
         "Верни только JSON вида {\"suggestions\":[{\"field\":\"...\",\"value\":\"...\","
         "\"evidence\":\"точная цитата со страницы\",\"source_index\":0,\"confidence\":\"high|medium\"}]}. "
         "Не больше 8 предложений. Цитата evidence — не длиннее 180 символов и обязана дословно встречаться в тексте. "
+        "Можно цитировать также заголовок title. Для названия компании используй явно названный бренд, "
+        "даже если юридическое наименование не опубликовано. Формулируй значения близко к цитате. "
+        "Для description, products_services, customer_types, business_model и dependencies "
+        "используй короткий дословный фрагмент evidence вместо свободного пересказа. "
+        "В первую очередь найди company_name, description, industry_tags и products_services, если они разрешены. "
+        "Регион в заголовке регионального сайта, зона покрытия, адрес магазина и местоположение клиента "
+        "не подтверждают страну, регион или город самой компании. Для этих полей нужен явный адрес компании. "
         "У каждого предложения есть confidence: high или medium. Если сведений нет, пропусти поле. "
         "Для dependencies перечисляй только прямо названные зависимости от сырья, поставок или оборудования; "
         "для market_geographies — массив только явно перечисленных рынков сбыта/поставок, не адресов филиалов. "
         "Для industry_tags — массив только отраслей, которые подтверждены конкретной формулировкой страницы. "
-        "Один объект — одно поле. "
+        "Один объект — одно поле; не повторяй поля. Для industry_tags и market_geographies value всегда массив строк, "
+        "например {\"field\":\"industry_tags\",\"value\":[\"it_communications\"],\"evidence\":\"...\","
+        "\"source_index\":0,\"confidence\":\"high\"}. Для остальных полей value — строка. "
         "Если достоверной цитаты нет, поле пропусти. Не извлекай финансовые показатели, ИНН, ОКВЭД, "
         "контакты, оценки потребностей/интересов, прогнозы или юридические выводы. "
         "industry_tags допускает только ID из переданного словаря. Не возвращай ключи вне разрешённого списка."
@@ -181,14 +190,17 @@ def _validate_suggestions(raw: list, pages: list[dict], current_profile: dict) -
         if not isinstance(item, dict):
             continue
         field = item.get("field")
-        if field not in MAX_FIELDS or field in seen_fields or not _is_empty(current_profile.get(field)):
+        if not isinstance(field, str) or field not in MAX_FIELDS or field in seen_fields or not _is_empty(current_profile.get(field)):
             continue
         source_index = item.get("source_index")
         if not isinstance(source_index, int) or isinstance(source_index, bool) or not 0 <= source_index < len(pages):
             continue
         evidence = _clean(item.get("evidence"), 600)
-        source_text = pages[source_index]["text"]
-        if len(evidence) < 12 or _normal(evidence) not in _normal(source_text):
+        source_text = pages[source_index]["title"] + " " + pages[source_index]["text"]
+        if len(evidence) < 12:
+            continue
+        evidence = _source_quote(evidence, source_text)
+        if not evidence:
             continue
         value = item.get("value")
         if field in TEXT_FIELDS:
@@ -203,6 +215,10 @@ def _validate_suggestions(raw: list, pages: list[dict], current_profile: dict) -
             elif not _supported_description(value, evidence):
                 continue
         else:
+            # Some configured models serialize a single array item as a string.
+            # Membership, size and evidence checks below still apply unchanged.
+            if isinstance(value, str):
+                value = [value]
             if not isinstance(value, list) or len(value) > MAX_FIELDS[field]:
                 continue
             if field == "industry_tags":
@@ -217,10 +233,14 @@ def _validate_suggestions(raw: list, pages: list[dict], current_profile: dict) -
                 value = list(dict.fromkeys(place.strip() for place in value))
                 if not value or not all(_normal(place) in _normal(evidence) for place in value):
                     continue
+                if not any(term in evidence.casefold() for term in (
+                    "постав", "прода", "экспорт", "импорт", "рынк", "клиент", "продук", "услуг",
+                )):
+                    continue
             if not _numbers_supported(" ".join(value), evidence):
                 continue
         confidence_label = item.get("confidence")
-        confidence = {"high": 0.9, "medium": 0.6}.get(confidence_label)
+        confidence = {"high": 0.9, "medium": 0.6}.get(confidence_label) if isinstance(confidence_label, str) else None
         if confidence is None:
             continue
         result.append(
@@ -245,7 +265,7 @@ TAG_KEYWORDS = {
     "construction": ("строитель", "строим", "ремонт", "construction"),
     "transport_logistics": ("логист", "перевоз", "достав", "транспорт"),
     "agriculture": ("сельск", "агро", "фермер", "agricultur"),
-    "it_communications": ("программ", "разработ", "it-", "связь", "software"),
+    "it_communications": ("программ", "разработ", "it-", "связь", "связи", "телеком", "кибер", "антивирус", "software"),
     "business_services": ("консалт", "бизнес-услуг", "аудит", "consult"),
     "consumer_services": ("услуги населени", "для частных", "сервис для", "consumer"),
     "real_estate": ("недвижим", "аренда объект", "real estate"),
@@ -268,6 +288,9 @@ _PROFILE_STOPWORDS = {"компания", "компании", "наша", "на�
 
 def _supported_description(value: str, evidence: str) -> bool:
     """Block unsupported business descriptions without requiring word-for-word copies."""
+    if _normal(value) in _normal(evidence):
+        return True
+
     def stems(text: str) -> set[str]:
         return {
             token[:5] for token in re.findall(r"[a-zа-яё]{5,}", text.casefold().replace("ё", "е"))
@@ -281,7 +304,7 @@ def _supported_description(value: str, evidence: str) -> bool:
     common = proposed & quoted
     # A paraphrase still needs at least two matching meaningful concepts,
     # and most of its content must be attributable to the cited passage.
-    return len(common) >= min(2, len(proposed)) and len(common) / len(proposed) >= 0.5
+    return len(common) >= min(2, len(proposed)) and len(common) / len(proposed) >= 0.8
 
 
 def _is_empty(value: object) -> bool:
@@ -296,6 +319,19 @@ def _clean(value: object, limit: int) -> str:
 
 def _normal(value: str) -> str:
     return " ".join(value.casefold().split())
+
+
+def _source_quote(evidence: str, source_text: str) -> str:
+    """Tolerate typography while storing the actual, verbatim source passage."""
+    dashes = "-‐‑‒–—−"
+    quotes = '"«»„“”'
+    pattern = "".join(
+        r"\s+" if char.isspace() else f"[{dashes}]" if char in dashes
+        else f"[{quotes}]" if char in quotes else re.escape(char)
+        for char in evidence
+    )
+    match = re.search(pattern, source_text, flags=re.IGNORECASE)
+    return match.group(0) if match else ""
 
 
 def _numbers_supported(value: str, evidence: str) -> bool:

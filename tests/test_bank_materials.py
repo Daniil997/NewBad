@@ -111,14 +111,16 @@ def test_invalid_material_is_not_saved(client, changes):
     assert client.get("/api/bank/analytics").json()["documents"] == 9
 
 
-def test_creation_requires_session_and_csrf():
+def test_creation_without_login_requires_valid_csrf():
     with TestClient(app) as client:
-        csrf = client.get("/api/auth/csrf").json()["csrf_token"]
-        assert client.post("/api/bank/analytics", json=material(), headers={"X-CSRF-Token": csrf}).status_code == 401
-        user = create_user("csrf_editor", "synthetic-material-test-password")
-        token, _ = create_session(user["id"])
-        client.cookies.set("newbad_session", token)
         assert client.post("/api/bank/analytics", json=material()).status_code == 403
+        csrf = client.get("/api/auth/csrf").json()["csrf_token"]
+        assert client.post("/api/bank/analytics", json=material()).status_code == 403
+        assert client.post("/api/bank/analytics", json=material(), headers={"X-CSRF-Token": "wrong"}).status_code == 403
+        assert client.post("/api/bank/analytics", json=material(), headers={"X-CSRF-Token": csrf}).status_code == 201
+        assert "newbad_session" not in client.cookies
+        with connect_app() as connection:
+            assert connection.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
 
 
 def test_future_material_is_saved_but_not_used_before_publication(client):
@@ -232,20 +234,19 @@ def test_conflicting_edit_or_delete_leaves_data_intact(client):
     assert client.delete("/api/bank/analytics/missing").status_code == 404
 
 
-def test_mutations_require_auth_and_csrf_and_deleted_content_can_be_added_again(client):
+def test_edit_and_delete_without_login_require_csrf_and_deleted_content_can_be_added_again(client):
     client, _ = client
     document_id = client.post("/api/bank/analytics", json=material()).json()["id"]
     url = f"/api/bank/analytics/{document_id}"
     csrf = client.headers.pop("X-CSRF-Token")
+    client.cookies.delete("newbad_session")
     assert client.put(url, json=material()).status_code == 403
     assert client.delete(url).status_code == 403
-    client.cookies.delete("newbad_session")
-    assert client.put(url, json=material(), headers={"X-CSRF-Token": csrf}).status_code == 401
-    assert client.delete(url, headers={"X-CSRF-Token": csrf}).status_code == 401
-    user = create_user("second_editor", "synthetic-material-test-password")
-    token, _ = create_session(user["id"])
-    client.cookies.set("newbad_session", token)
+    assert client.put(url, json=material(), headers={"X-CSRF-Token": "wrong"}).status_code == 403
+    assert client.delete(url, headers={"X-CSRF-Token": "wrong"}).status_code == 403
     client.headers["X-CSRF-Token"] = csrf
+    assert client.put(url, json=material(title="Обновлено без входа")).status_code == 200
+    assert client.get(url).json()["title"] == "Обновлено без входа"
     assert client.delete(url).status_code == 204
     assert client.delete(url).status_code == 404
     recreated = client.post("/api/bank/analytics", json=material())

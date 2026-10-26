@@ -129,14 +129,16 @@ def test_corpus_api_and_profile_feed_expose_sqlite_content_without_files():
     user, _ = company("reader", product_credit="yes")
     store_imported_news("test", [article()])
     with TestClient(app) as client:
-        assert client.get("/api/bank/analytics").status_code == 401
-        token, _ = create_session(user["id"])
-        client.cookies.set("newbad_session", token)
+        assert client.get("/api/bank/analytics").status_code == 200
         corpus = client.get("/api/bank/analytics", params={"q": "ставка"}).json()
         assert corpus["documents"] == 9 and corpus["matches"]
         document = client.get("/api/bank/analytics/inflation").json()
         assert len(document["pages"]) == 3 and document["reviewed_passages"]
         assert client.get("/api/bank/analytics/missing").status_code == 404
+        assert client.get("/api/real/feed").status_code == 401
+        assert client.get("/api/real/profile").status_code == 401
+        token, _ = create_session(user["id"])
+        client.cookies.set("newbad_session", token)
         feed = client.get("/api/real/feed").json()
         row = next(item for item in feed["items"] if item["id"] == "rate-change")
         assert row["bank_recommendation"]["origin"] == "corpus"

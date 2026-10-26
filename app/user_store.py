@@ -658,6 +658,7 @@ def save_business_profile(user_id: str, profile: dict, status: str) -> dict | No
     serialized = json.dumps(profile, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     now = now_utc()
     with connect_app() as connection:
+        connection.execute("BEGIN IMMEDIATE")
         row = connection.execute(
             "SELECT profile_json, profile_version FROM business_profiles WHERE owner_id = ?",
             (user_id,),
@@ -665,6 +666,7 @@ def save_business_profile(user_id: str, profile: dict, status: str) -> dict | No
         if not row:
             return None
         current = row["profile_json"]
+        previous = json.loads(current)
         version = int(row["profile_version"])
         if current != serialized:
             version += 1
@@ -673,13 +675,33 @@ def save_business_profile(user_id: str, profile: dict, status: str) -> dict | No
             "WHERE owner_id = ?",
             (serialized, version, status, now, user_id),
         )
+        # Proposals belong to the website that was scanned and to empty fields.
+        # Remove obsolete proposals in the same transaction as the manual edit.
+        if previous.get("website") != profile.get("website"):
+            connection.execute(
+                "DELETE FROM profile_field_sources WHERE profile_id = "
+                "(SELECT id FROM business_profiles WHERE owner_id = ?) AND review_status = 'pending'",
+                (user_id,),
+            )
+        else:
+            for field_name, value in profile.items():
+                if value not in (None, "", []):
+                    connection.execute(
+                        "DELETE FROM profile_field_sources WHERE profile_id = "
+                        "(SELECT id FROM business_profiles WHERE owner_id = ?) "
+                        "AND field_name = ? AND review_status = 'pending'",
+                        (user_id, field_name),
+                    )
     return business_profile_for_owner(user_id)
 
 
-def save_profile_suggestions(user_id: str, suggestions: list[dict]) -> list[dict]:
+def save_profile_suggestions(
+    user_id: str, suggestions: list[dict], *, expected_website: str | None = None,
+) -> list[dict]:
     now = now_utc()
     saved: list[dict] = []
     with connect_app() as connection:
+        connection.execute("BEGIN IMMEDIATE")
         profile_row = connection.execute(
             "SELECT id, profile_json FROM business_profiles WHERE owner_id = ?",
             (user_id,),
@@ -691,6 +713,8 @@ def save_profile_suggestions(user_id: str, suggestions: list[dict]) -> list[dict
             profile = json.loads(profile_row["profile_json"])
         except (TypeError, json.JSONDecodeError):
             profile = {}
+        if expected_website is not None and profile.get("website") != expected_website:
+            return saved
         connection.execute(
             "DELETE FROM profile_field_sources WHERE profile_id = ? AND review_status = 'pending'",
             (profile_id,),
@@ -719,7 +743,6 @@ def save_profile_suggestions(user_id: str, suggestions: list[dict]) -> list[dict
                     confidence = excluded.confidence,
                     review_status = 'pending',
                     updated_at = excluded.updated_at
-                WHERE profile_field_sources.review_status = 'pending'
                 """,
                 (
                     secrets.token_hex(16), profile_id, field_name, value_json,
@@ -793,6 +816,7 @@ def decide_profile_suggestion(user_id: str, field_name: str, source_url: str, *,
         return "not_found"
     now = now_utc()
     with connect_app() as connection:
+        connection.execute("BEGIN IMMEDIATE")
         profile_row = connection.execute(
             "SELECT id, profile_json, profile_version FROM business_profiles WHERE owner_id = ?",
             (user_id,),
@@ -823,6 +847,8 @@ def decide_profile_suggestion(user_id: str, field_name: str, source_url: str, *,
         if current_value not in (None, "", []):
             return "conflict"
         profile[field_name] = proposal.get("value")
+        if field_name == "description":
+            profile["description_skipped"] = False
         serialized = json.dumps(profile, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         status = "complete" if profile.get("company_name") and (profile.get("description") or profile.get("description_skipped")) else "incomplete"
         connection.execute(
@@ -884,7 +910,7 @@ def claim_site_analysis(user_id: str) -> tuple[str, dict] | str | None:
         recent = connection.execute(
             """
             SELECT started_at FROM profile_site_analysis_runs
-            WHERE profile_id = ? AND started_at > ?
+            WHERE profile_id = ? AND started_at > ? AND (status = 'completed' OR pages_scanned > 0)
             ORDER BY started_at DESC LIMIT 1
             """,
             (profile_row["id"], cooldown_from),
